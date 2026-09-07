@@ -1,9 +1,5 @@
 {
-    "coachs": [
-        {
-            "id": "",
-            "firstName": "",
-            "secondName": ""
-        }
-    ]
+  "trainers": [
+  ],
+  "$schema": "./node_modules/json-server/schema.json"
 }
