@@ -1,4 +1,4 @@
-const navigationItems = [
+const authenticatedNavigationItems = [
   {
     id: 'schedule',
     label: 'Расписание дежурств',
@@ -19,15 +19,33 @@ const navigationItems = [
     label: 'Список тренеров',
     href: '#/trainers',
   },
+  {
+    id: 'auth',
+    label: 'Авторизация',
+    href: '#/auth',
+  },
+];
+
+const unauthenticatedNavigationItems = [
+  {
+    id: 'auth',
+    label: 'Авторизация',
+    href: '#/auth',
+  },
 ];
 
 type SidebarProps = {
   isOpen: boolean;
   currentPage: string;
+  isAuthenticated: boolean;
   onClose: () => void;
 };
 
-function Sidebar({ isOpen, currentPage, onClose }: SidebarProps) {
+function Sidebar({ isOpen, currentPage, isAuthenticated, onClose }: SidebarProps) {
+  const navigationItems = isAuthenticated
+    ? authenticatedNavigationItems
+    : unauthenticatedNavigationItems;
+
   return (
     <>
       {isOpen ? (
