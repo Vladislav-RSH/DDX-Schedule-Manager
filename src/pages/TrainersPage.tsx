@@ -3,6 +3,8 @@ import {
   createTrainer,
   deleteTrainer,
   getTrainers,
+  sortTrainers,
+  subscribeToTrainers,
   type Trainer,
 } from '../api/trainers';
 
@@ -49,8 +51,26 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
 
     void loadTrainers();
 
+    const unsubscribeTrainers = subscribeToTrainers((change) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setTrainers((currentTrainers) => {
+        if (change.type === 'delete') {
+          return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
+        }
+
+        return sortTrainers([
+          ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
+          change.trainer,
+        ]);
+      });
+    });
+
     return () => {
       isMounted = false;
+      unsubscribeTrainers();
     };
   }, []);
 
@@ -68,7 +88,9 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
     try {
       setIsSubmitting(true);
       const trainer = await createTrainer({ firstName, lastName });
-      setTrainers((currentTrainers) => [...currentTrainers, trainer]);
+      setTrainers((currentTrainers) =>
+        sortTrainers([...currentTrainers.filter((currentTrainer) => currentTrainer.id !== trainer.id), trainer]),
+      );
       setForm({ firstName: '', lastName: '' });
       setIsFormOpen(false);
       setErrorMessage('');

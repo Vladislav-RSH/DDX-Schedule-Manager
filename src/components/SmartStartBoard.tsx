@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createSmartStartAssignment, deleteSmartStartAssignment, getSmartStartAssignments, updateSmartStartAssignment } from '../api/smartStartAssignments';
-import { getTrainers, type Trainer } from '../api/trainers';
+import {
+  createSmartStartAssignment,
+  deleteSmartStartAssignment,
+  getSmartStartAssignments,
+  subscribeToSmartStartAssignments,
+  updateSmartStartAssignment,
+} from '../api/smartStartAssignments';
+import { getTrainers, sortTrainers, subscribeToTrainers, type Trainer } from '../api/trainers';
 import TrainerField from './TrainerField';
 import {
   buildTrainerOptions,
   getAssignmentDisplayValue,
   getDateKey,
   getTrainerName,
-  loadStoredAssignments,
-  saveStoredAssignments,
   type TrainerAssignmentMap,
 } from '../lib/trainerAssignmentUtils';
 
@@ -48,8 +52,6 @@ const weekendSessions = [
 ];
 
 const weekdayLabels = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
-
-const smartStartAssignmentsStorageKey = 'ddx-smart-start-assignments';
 
 const formatDayLabel = (date: Date) => {
   const weekday = weekdayLabels[date.getDay()];
@@ -168,9 +170,7 @@ type SmartStartBoardProps = {
 function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
   const [trainers, setTrainers] = useState<Trainer[]>([]);
-  const [assignments, setAssignments] = useState<AssignmentMap>(() =>
-    loadStoredAssignments(smartStartAssignmentsStorageKey),
-  );
+  const [assignments, setAssignments] = useState<AssignmentMap>({});
   const [savingCells, setSavingCells] = useState<SavingMap>({});
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -181,10 +181,6 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
     [selectedMonth],
   );
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
-
-  useEffect(() => {
-    saveStoredAssignments(smartStartAssignmentsStorageKey, assignments);
-  }, [assignments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -202,7 +198,7 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
       const loadErrors: string[] = [];
 
       if (trainersResult.status === 'fulfilled') {
-        setTrainers(trainersResult.value);
+        setTrainers(sortTrainers(trainersResult.value));
       } else {
         loadErrors.push('Не удалось загрузить список тренеров.');
       }
@@ -222,10 +218,7 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
           {},
         );
 
-        setAssignments((currentAssignments) => ({
-          ...nextAssignments,
-          ...currentAssignments,
-        }));
+        setAssignments(nextAssignments);
       } else {
         loadErrors.push('Не удалось загрузить расписание Smart Start.');
       }
@@ -236,8 +229,45 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
 
     void loadData();
 
+    const unsubscribeTrainers = subscribeToTrainers((change) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setTrainers((currentTrainers) => {
+        if (change.type === 'delete') {
+          return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
+        }
+
+        return sortTrainers([
+          ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
+          change.trainer,
+        ]);
+      });
+    });
+
+    const unsubscribeAssignments = subscribeToSmartStartAssignments((change) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setAssignments((currentAssignments) => {
+        const nextAssignments = { ...currentAssignments };
+
+        if (change.type === 'delete') {
+          delete nextAssignments[change.assignmentId];
+        } else {
+          nextAssignments[change.assignment.id] = change.assignment;
+        }
+
+        return nextAssignments;
+      });
+    });
+
     return () => {
       isMounted = false;
+      unsubscribeTrainers();
+      unsubscribeAssignments();
     };
   }, []);
 

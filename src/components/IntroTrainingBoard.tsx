@@ -11,9 +11,10 @@ import {
   createIntroTrainingAssignment,
   deleteIntroTrainingAssignment,
   getIntroTrainingAssignments,
+  subscribeToIntroTrainingAssignments,
   updateIntroTrainingAssignment,
 } from '../api/introTrainingAssignments';
-import { getTrainers, type Trainer } from '../api/trainers';
+import { getTrainers, sortTrainers, subscribeToTrainers, type Trainer } from '../api/trainers';
 
 type IntroTrainingDay = {
   label: string;
@@ -169,61 +170,6 @@ const getDateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
     date.getDate(),
   ).padStart(2, '0')}`;
-
-const introTrainingAssignmentsStorageKey = 'ddx-intro-training-assignments';
-
-const isSavedAssignment = (value: unknown): value is SavedAssignment => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as SavedAssignment;
-
-  return (
-    (typeof candidate.trainerId === 'string' || candidate.trainerId === null) &&
-    typeof candidate.trainerName === 'string' &&
-    typeof candidate.date === 'string' &&
-    typeof candidate.time === 'string'
-  );
-};
-
-const loadStoredAssignments = (): AssignmentMap => {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const raw = window.localStorage.getItem(introTrainingAssignmentsStorageKey);
-
-    if (!raw) {
-      return {};
-    }
-
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    return Object.entries(parsed).reduce<AssignmentMap>((accumulator, [key, value]) => {
-      if (isSavedAssignment(value)) {
-        accumulator[key] = value;
-      }
-
-      return accumulator;
-    }, {});
-  } catch {
-    return {};
-  }
-};
-
-const saveStoredAssignments = (assignments: AssignmentMap) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(introTrainingAssignmentsStorageKey, JSON.stringify(assignments));
-  } catch {
-    // Ignore storage quota / privacy mode failures.
-  }
-};
 
 const buildTrainerOptions = (trainers: Trainer[]): TrainerOption[] =>
   trainers
@@ -477,7 +423,7 @@ type IntroTrainingBoardProps = {
 function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
   const [trainers, setTrainers] = useState<Trainer[]>([]);
-  const [assignments, setAssignments] = useState<AssignmentMap>(() => loadStoredAssignments());
+  const [assignments, setAssignments] = useState<AssignmentMap>({});
   const [savingCells, setSavingCells] = useState<SavingMap>({});
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -489,10 +435,6 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
   );
 
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
-
-  useEffect(() => {
-    saveStoredAssignments(assignments);
-  }, [assignments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -519,11 +461,8 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
           return accumulator;
         }, {});
 
-        setTrainers(loadedTrainers);
-        setAssignments((currentAssignments) => ({
-          ...nextAssignments,
-          ...currentAssignments,
-        }));
+        setTrainers(sortTrainers(loadedTrainers));
+        setAssignments(nextAssignments);
         setErrorMessage('');
       } catch {
         if (isMounted) {
@@ -538,8 +477,45 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
 
     void loadData();
 
+    const unsubscribeTrainers = subscribeToTrainers((change) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setTrainers((currentTrainers) => {
+        if (change.type === 'delete') {
+          return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
+        }
+
+        return sortTrainers([
+          ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
+          change.trainer,
+        ]);
+      });
+    });
+
+    const unsubscribeAssignments = subscribeToIntroTrainingAssignments((change) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setAssignments((currentAssignments) => {
+        const nextAssignments = { ...currentAssignments };
+
+        if (change.type === 'delete') {
+          delete nextAssignments[change.assignmentId];
+        } else {
+          nextAssignments[change.assignment.id] = change.assignment;
+        }
+
+        return nextAssignments;
+      });
+    });
+
     return () => {
       isMounted = false;
+      unsubscribeTrainers();
+      unsubscribeAssignments();
     };
   }, []);
 
