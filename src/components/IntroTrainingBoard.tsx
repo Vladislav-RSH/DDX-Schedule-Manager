@@ -1,4 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react';
+import {
+  createIntroTrainingAssignment,
+  deleteIntroTrainingAssignment,
+  getIntroTrainingAssignments,
+  updateIntroTrainingAssignment,
+} from '../api/introTrainingAssignments';
+import { getTrainers, type Trainer } from '../api/trainers';
 
 type IntroTrainingDay = {
   label: string;
@@ -15,6 +30,22 @@ type DayHeader = {
   weekday: string;
   date: string;
 };
+
+type TrainerOption = {
+  trainer: Trainer;
+  label: string;
+  searchLabel: string;
+};
+
+type SavedAssignment = {
+  trainerId: string | null;
+  trainerName: string;
+  date: string;
+  time: string;
+};
+
+type AssignmentMap = Record<string, SavedAssignment>;
+type SavingMap = Record<string, boolean>;
 
 const introTrainingTimeSlots = ['10:00', '13:00', '16:00', '19:00', '21:00'];
 
@@ -34,6 +65,15 @@ const splitDayLabel = (label: string): DayHeader => {
 
   return { weekday, date };
 };
+
+const getTrainerName = (trainer: Trainer) =>
+  [trainer.lastName, trainer.firstName].filter(Boolean).join(' ') || 'Без имени';
+
+const getTrainerShortName = (trainer: Trainer) => trainer.lastName.trim() || getTrainerName(trainer);
+
+const getTrainerShortNameFromLabel = (label: string) => label.trim().split(/\s+/)[0] || label;
+
+const normalizeValue = (value: string) => value.trim().toLocaleLowerCase('ru-RU');
 
 const createDay = (date: Date): IntroTrainingDay => ({
   label: formatDayLabel(date),
@@ -120,11 +160,315 @@ const getWeekdayDays = (days: IntroTrainingDay[]) =>
 const getWeekendDays = (days: IntroTrainingDay[]) =>
   days.filter((day) => day.date.getDay() === 6 || day.date.getDay() === 0);
 
-const sessionBadgeClass =
-  'inline-flex max-w-full items-center rounded-lg bg-slate-950 px-2.5 py-1.5 text-[10px] font-black uppercase leading-tight text-white break-words';
+const getCellKey = (date: Date, slot: string) =>
+  `intro-training-${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}-${slot.replace(/[^0-9]/g, '')}`;
 
-const renderSession = (session: string | null) =>
-  session ? <span className={sessionBadgeClass}>{session}</span> : null;
+const getDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+
+const introTrainingAssignmentsStorageKey = 'ddx-intro-training-assignments';
+
+const isSavedAssignment = (value: unknown): value is SavedAssignment => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as SavedAssignment;
+
+  return (
+    (typeof candidate.trainerId === 'string' || candidate.trainerId === null) &&
+    typeof candidate.trainerName === 'string' &&
+    typeof candidate.date === 'string' &&
+    typeof candidate.time === 'string'
+  );
+};
+
+const loadStoredAssignments = (): AssignmentMap => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(introTrainingAssignmentsStorageKey);
+
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    return Object.entries(parsed).reduce<AssignmentMap>((accumulator, [key, value]) => {
+      if (isSavedAssignment(value)) {
+        accumulator[key] = value;
+      }
+
+      return accumulator;
+    }, {});
+  } catch {
+    return {};
+  }
+};
+
+const saveStoredAssignments = (assignments: AssignmentMap) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(introTrainingAssignmentsStorageKey, JSON.stringify(assignments));
+  } catch {
+    // Ignore storage quota / privacy mode failures.
+  }
+};
+
+const buildTrainerOptions = (trainers: Trainer[]): TrainerOption[] =>
+  trainers
+    .map((trainer) => {
+      const label = getTrainerName(trainer);
+
+      return {
+        trainer,
+        label,
+        searchLabel: normalizeValue([label, trainer.firstName, trainer.lastName].join(' ')),
+      };
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, 'ru-RU'));
+
+const getAssignmentDisplayValue = (assignment: SavedAssignment | null, trainerOptions: TrainerOption[]) => {
+  if (!assignment) {
+    return '';
+  }
+
+  const matchedTrainer = trainerOptions.find((option) => option.trainer.id === assignment.trainerId);
+
+  if (matchedTrainer) {
+    return getTrainerShortName(matchedTrainer.trainer);
+  }
+
+  return getTrainerShortNameFromLabel(assignment.trainerName);
+};
+
+type TrainerFieldProps = {
+  inputId: string;
+  selectedValue: string;
+  selectedTrainerId: string | null;
+  trainerOptions: TrainerOption[];
+  disabled: boolean;
+  saving: boolean;
+  onCommit: (trainer: Trainer | null) => void;
+};
+
+function TrainerField({
+  inputId,
+  selectedValue,
+  selectedTrainerId,
+  trainerOptions,
+  disabled,
+  saving,
+  onCommit,
+}: TrainerFieldProps) {
+  const [query, setQuery] = useState(selectedValue);
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const selectedTrainerIndex = trainerOptions.findIndex(
+    ({ trainer }) => trainer.id === selectedTrainerId,
+  );
+
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = normalizeValue(query);
+
+    if (!normalizedQuery) {
+      return trainerOptions;
+    }
+
+    return trainerOptions.filter(({ searchLabel }) => searchLabel.includes(normalizedQuery));
+  }, [query, trainerOptions]);
+  const visibleActiveIndex =
+    filteredOptions.length === 0 ? 0 : Math.min(activeIndex, filteredOptions.length - 1);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+
+      if (containerRef.current && target && !containerRef.current.contains(target)) {
+        setIsOpen(false);
+        setActiveIndex(0);
+        setQuery(selectedValue);
+      }
+    };
+
+    if (!isOpen) {
+      return undefined;
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [isOpen, selectedValue]);
+
+  const commitTrainer = (trainer: Trainer | null) => {
+    onCommit(trainer);
+    setIsOpen(false);
+    setActiveIndex(0);
+    setQuery(trainer ? getTrainerShortName(trainer) : '');
+  };
+
+  const handleFocus = (event: FocusEvent<HTMLInputElement>) => {
+    if (disabled || saving) {
+      return;
+    }
+
+    const input = event.currentTarget;
+
+    setIsOpen(true);
+    setQuery(selectedValue);
+    setActiveIndex(selectedTrainerIndex >= 0 ? selectedTrainerIndex : 0);
+
+    requestAnimationFrame(() => {
+      if (input.isConnected) {
+        input.select();
+      }
+    });
+  };
+
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextQuery = event.target.value;
+    setQuery(nextQuery);
+    setIsOpen(true);
+    setActiveIndex(0);
+
+    if (!nextQuery.trim()) {
+      onCommit(null);
+      return;
+    }
+  };
+
+  const handleBlur = (event: FocusEvent<HTMLInputElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+
+    if (nextTarget && containerRef.current?.contains(nextTarget)) {
+      return;
+    }
+
+    setIsOpen(false);
+    setActiveIndex(0);
+    setQuery(selectedValue);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (disabled || saving) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setIsOpen(true);
+      setActiveIndex((currentIndex) =>
+        filteredOptions.length === 0 ? 0 : (currentIndex + 1) % filteredOptions.length,
+      );
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setIsOpen(true);
+      setActiveIndex((currentIndex) =>
+        filteredOptions.length === 0
+          ? 0
+          : (currentIndex - 1 + filteredOptions.length) % filteredOptions.length,
+      );
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+
+      if (filteredOptions.length === 0) {
+        return;
+      }
+
+      const selectedOption = filteredOptions[visibleActiveIndex] ?? filteredOptions[0];
+      commitTrainer(selectedOption.trainer);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsOpen(false);
+      setActiveIndex(0);
+      setQuery(selectedValue);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative w-full min-w-0">
+      <input
+        id={inputId}
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        className="h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white px-2 text-center text-[11px] font-bold text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-[#ff6a00] focus:ring-2 focus:ring-[#ff6a00]/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+        value={isOpen ? query : selectedValue}
+        disabled={disabled || saving}
+        placeholder={disabled ? 'Нет тренеров' : 'Тренер'}
+        aria-label="Выбрать тренера"
+        aria-expanded={isOpen}
+        aria-controls={`${inputId}-options`}
+        onFocus={handleFocus}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+      />
+
+      {isOpen && !disabled && !saving ? (
+        <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
+          <ul id={`${inputId}-options`} role="listbox" className="max-h-56 overflow-auto py-1 text-left">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map(({ trainer, label }, index) => {
+                const isSelected = selectedTrainerId === trainer.id;
+                const isHighlighted = index === visibleActiveIndex;
+
+                return (
+                  <li key={trainer.id}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition ${
+                        isHighlighted
+                          ? 'bg-[#ff6a00]/10 text-slate-950'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      } ${isSelected ? 'font-bold' : 'font-medium'}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => commitTrainer(trainer)}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{label}</span>
+                      {isSelected ? (
+                        <span className="shrink-0 rounded-full bg-[#ecfdff] px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                          Выбран
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })
+            ) : (
+              <li className="px-3 py-2 text-sm text-slate-500">Совпадений нет</li>
+            )}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 type IntroTrainingBoardProps = {
   onOpenSidebar: () => void;
@@ -132,6 +476,11 @@ type IntroTrainingBoardProps = {
 
 function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentMap>(() => loadStoredAssignments());
+  const [savingCells, setSavingCells] = useState<SavingMap>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
 
   const selectedMonthWeeks = useMemo(
@@ -139,9 +488,133 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
     [selectedMonth],
   );
 
+  const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
+
+  useEffect(() => {
+    saveStoredAssignments(assignments);
+  }, [assignments]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadData = async () => {
+      try {
+        const [loadedTrainers, loadedAssignments] = await Promise.all([
+          getTrainers(),
+          getIntroTrainingAssignments(),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        const nextAssignments = loadedAssignments.reduce<AssignmentMap>((accumulator, assignment) => {
+          accumulator[assignment.id] = {
+            trainerId: assignment.trainerId,
+            trainerName: assignment.trainerName,
+            date: assignment.date,
+            time: assignment.time,
+          };
+
+          return accumulator;
+        }, {});
+
+        setTrainers(loadedTrainers);
+        setAssignments((currentAssignments) => ({
+          ...nextAssignments,
+          ...currentAssignments,
+        }));
+        setErrorMessage('');
+      } catch {
+        if (isMounted) {
+          setErrorMessage('Не удалось загрузить список тренеров.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   useEffect(() => {
     boardScrollRef.current?.scrollTo({ left: 0 });
   }, [selectedMonth]);
+
+  const commitTrainer = async (
+    cellKey: string,
+    date: Date,
+    slot: string,
+    trainer: Trainer | null,
+  ) => {
+    const previousAssignment = assignments[cellKey] ?? null;
+    const nextAssignment =
+      trainer === null
+        ? null
+        : {
+            trainerId: trainer.id,
+            trainerName: getTrainerName(trainer),
+            date: getDateKey(date),
+            time: slot,
+          };
+
+    if (
+      previousAssignment?.trainerId === nextAssignment?.trainerId &&
+      previousAssignment?.trainerName === nextAssignment?.trainerName
+    ) {
+      return;
+    }
+
+    setSavingCells((currentSavingCells) => ({
+      ...currentSavingCells,
+      [cellKey]: true,
+    }));
+    setErrorMessage('');
+
+    setAssignments((currentAssignments) => {
+      const nextAssignments = { ...currentAssignments };
+
+      if (nextAssignment) {
+        nextAssignments[cellKey] = nextAssignment;
+      } else {
+        delete nextAssignments[cellKey];
+      }
+
+      return nextAssignments;
+    });
+
+    try {
+      if (nextAssignment && previousAssignment) {
+        await updateIntroTrainingAssignment(cellKey, nextAssignment);
+      } else if (nextAssignment) {
+        await createIntroTrainingAssignment({
+          id: cellKey,
+          ...nextAssignment,
+        });
+      } else if (previousAssignment) {
+        await deleteIntroTrainingAssignment(cellKey);
+      }
+    } catch {
+      if (nextAssignment) {
+        setErrorMessage('Не удалось сохранить тренера на сервере, но он останется после обновления.');
+      } else {
+        setErrorMessage('Не удалось удалить тренера на сервере, но изменение останется после обновления.');
+      }
+    } finally {
+      setSavingCells((currentSavingCells) => {
+        const nextSavingCells = { ...currentSavingCells };
+        delete nextSavingCells[cellKey];
+
+        return nextSavingCells;
+      });
+    }
+  };
 
   return (
     <section className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -158,7 +631,7 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
             <span className="h-0.5 w-5 rounded-full bg-current" />
           </button>
           <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-4xl">
-            DDX schedule
+            Расписание Федосеевский
           </h1>
         </header>
 
@@ -181,6 +654,12 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
             </select>
           </div>
         </div>
+
+        {errorMessage ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {errorMessage}
+          </div>
+        ) : null}
 
         <div ref={boardScrollRef} className="overflow-x-auto scroll-smooth snap-x snap-mandatory pb-2">
           <div className="flex gap-0">
@@ -229,19 +708,35 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
                           </div>
 
                           <div className="divide-y divide-slate-200">
-                            {introTrainingTimeSlots.map((slot, slotIndex) => (
-                              <div
-                                key={`${day.label}-${slot}`}
-                                className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-2 px-3 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)]"
-                              >
-                                <span className="text-[11px] font-black leading-tight text-slate-700">
-                                  {slot}
-                                </span>
-                                <div className="flex min-h-7 items-start">
-                                  {renderSession(day.sessions[slotIndex])}
+                            {introTrainingTimeSlots.map((slot) => {
+                              const cellKey = getCellKey(day.date, slot);
+                              const savedAssignment = assignments[cellKey] ?? null;
+
+                              return (
+                                <div
+                                  key={`${day.label}-${slot}`}
+                                  className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-2 px-3 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)]"
+                                >
+                                  <span className="text-[11px] font-black leading-tight text-slate-700">
+                                    {slot}
+                                  </span>
+                                  <div className="flex min-h-7 items-start">
+                                    <TrainerField
+                                      key={`${cellKey}-${savedAssignment?.trainerId ?? savedAssignment?.trainerName ?? 'empty'}`}
+                                      inputId={`${cellKey}-mobile`}
+                                      selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
+                                      selectedTrainerId={savedAssignment?.trainerId ?? null}
+                                      trainerOptions={trainerOptions}
+                                      disabled={isLoading || trainerOptions.length === 0}
+                                      saving={savingCells[cellKey] === true}
+                                      onCommit={(trainer) =>
+                                        void commitTrainer(cellKey, day.date, slot, trainer)
+                                      }
+                                    />
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </article>
                       );
@@ -302,7 +797,7 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
                       </thead>
 
                       <tbody>
-                        {introTrainingTimeSlots.map((slot, slotIndex) => (
+                        {introTrainingTimeSlots.map((slot) => (
                           <tr key={slot} className="group">
                             <th
                               scope="row"
@@ -311,34 +806,65 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
                               {slot}
                             </th>
 
-                            {weekdayDays.map((day) => (
-                              <td
-                                key={`${week.id}-${day.label}-${slot}`}
-                                className="border-b border-r border-slate-200 px-3 py-3 text-center align-middle transition-colors group-hover:bg-slate-50/80"
-                              >
-                                <div className="flex min-h-12 items-center justify-center">
-                                  {renderSession(day.sessions[slotIndex])}
-                                </div>
-                              </td>
-                            ))}
+                            {weekdayDays.map((day) => {
+                              const cellKey = getCellKey(day.date, slot);
+                              const savedAssignment = assignments[cellKey] ?? null;
+
+                              return (
+                                <td
+                                  key={`${week.id}-${day.label}-${slot}`}
+                                  className="border-b border-r border-slate-200 px-3 py-3 text-center align-middle transition-colors group-hover:bg-slate-50/80"
+                                >
+                                  <div className="flex min-h-12 items-center justify-center">
+                                    <TrainerField
+                                      key={`${cellKey}-${savedAssignment?.trainerId ?? savedAssignment?.trainerName ?? 'empty'}`}
+                                      inputId={`${cellKey}-desktop`}
+                                      selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
+                                      selectedTrainerId={savedAssignment?.trainerId ?? null}
+                                      trainerOptions={trainerOptions}
+                                      disabled={isLoading || trainerOptions.length === 0}
+                                      saving={savingCells[cellKey] === true}
+                                      onCommit={(trainer) =>
+                                        void commitTrainer(cellKey, day.date, slot, trainer)
+                                      }
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            })}
 
                             {weekendDays.length > 0 ? (
                               <th className="border-b border-r border-slate-200 bg-[#4fb2c4] px-2 py-3 text-center align-middle text-[11px] font-black text-slate-950 transition-colors group-hover:bg-[#47a9ba]">
-                                {introTrainingTimeSlots[slotIndex] ?? ''}
+                                {slot}
                               </th>
                             ) : null}
 
-                            {weekendDays.map((day) => (
-                              <td
-                                key={`${week.id}-${day.label}-${slot}`}
-                                className="border-b border-r border-slate-200 px-3 py-3 text-center align-middle transition-colors group-hover:bg-slate-50/80 last:border-r-0"
-                              >
-                                <div className="flex min-h-12 items-center justify-center">
-                                  {renderSession(day.sessions[slotIndex])}
-                                </div>
-                              </td>
-                            ))}
+                            {weekendDays.map((day) => {
+                              const cellKey = getCellKey(day.date, slot);
+                              const savedAssignment = assignments[cellKey] ?? null;
 
+                              return (
+                                <td
+                                  key={`${week.id}-${day.label}-${slot}`}
+                                  className="border-b border-r border-slate-200 px-3 py-3 text-center align-middle transition-colors group-hover:bg-slate-50/80 last:border-r-0"
+                                >
+                                  <div className="flex min-h-12 items-center justify-center">
+                                    <TrainerField
+                                      key={`${cellKey}-${savedAssignment?.trainerId ?? savedAssignment?.trainerName ?? 'empty'}`}
+                                      inputId={`${cellKey}-desktop`}
+                                      selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
+                                      selectedTrainerId={savedAssignment?.trainerId ?? null}
+                                      trainerOptions={trainerOptions}
+                                      disabled={isLoading || trainerOptions.length === 0}
+                                      saving={savingCells[cellKey] === true}
+                                      onCommit={(trainer) =>
+                                        void commitTrainer(cellKey, day.date, slot, trainer)
+                                      }
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>

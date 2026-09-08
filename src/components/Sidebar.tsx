@@ -46,7 +46,7 @@ function Sidebar({ isOpen, currentPage, onClose }: SidebarProps) {
         aria-hidden={!isOpen}
       >
         <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4">
-          <p className="text-sm font-black tracking-tight text-slate-950">DDX schedule</p>
+          <p className="text-sm font-black tracking-tight text-slate-950">Расписание Федосеевский</p>
           <button
             type="button"
             className="relative h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#ff6a00]/30"

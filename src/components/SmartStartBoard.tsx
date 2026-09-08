@@ -1,4 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createSmartStartAssignment, deleteSmartStartAssignment, getSmartStartAssignments, updateSmartStartAssignment } from '../api/smartStartAssignments';
+import { getTrainers, type Trainer } from '../api/trainers';
+import TrainerField from './TrainerField';
+import {
+  buildTrainerOptions,
+  getAssignmentDisplayValue,
+  getDateKey,
+  getTrainerName,
+  loadStoredAssignments,
+  saveStoredAssignments,
+  type TrainerAssignmentMap,
+} from '../lib/trainerAssignmentUtils';
 
 type SmartStartDay = {
   label: string;
@@ -15,6 +27,9 @@ type DayHeader = {
   weekday: string;
   date: string;
 };
+
+type AssignmentMap = TrainerAssignmentMap;
+type SavingMap = Record<string, boolean>;
 
 const smartStartTimeSlots = ['10:00', '14:00', '18:00', '20:00'];
 
@@ -33,6 +48,8 @@ const weekendSessions = [
 ];
 
 const weekdayLabels = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
+
+const smartStartAssignmentsStorageKey = 'ddx-smart-start-assignments';
 
 const formatDayLabel = (date: Date) => {
   const weekday = weekdayLabels[date.getDay()];
@@ -141,12 +158,8 @@ const getWeekendDays = (days: SmartStartDay[]) =>
 const sessionBadgeClass =
   'inline-flex max-w-full items-center rounded-lg bg-slate-950 px-2.5 py-1.5 text-[10px] font-black uppercase leading-tight text-white break-words';
 
-const renderSession = (session: string | null) =>
-  session ? (
-    <span className={sessionBadgeClass}>{session}</span>
-  ) : (
-    <span aria-hidden="true" />
-  );
+const smartStartCellKey = (date: Date, slot: string) =>
+  `smart-start-${getDateKey(date)}-${slot.replace(/[^0-9]/g, '')}`;
 
 type SmartStartBoardProps = {
   onOpenSidebar: () => void;
@@ -154,16 +167,188 @@ type SmartStartBoardProps = {
 
 function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentMap>(() =>
+    loadStoredAssignments(smartStartAssignmentsStorageKey),
+  );
+  const [savingCells, setSavingCells] = useState<SavingMap>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
 
   const selectedMonthWeeks = useMemo(
     () => getMonthWeeks(currentYearWeeks, selectedMonth),
     [selectedMonth],
   );
+  const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
+
+  useEffect(() => {
+    saveStoredAssignments(smartStartAssignmentsStorageKey, assignments);
+  }, [assignments]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadData = async () => {
+      const [trainersResult, assignmentsResult] = await Promise.allSettled([
+        getTrainers(),
+        getSmartStartAssignments(),
+      ]);
+
+      if (!isMounted) {
+        return;
+      }
+
+      const loadErrors: string[] = [];
+
+      if (trainersResult.status === 'fulfilled') {
+        setTrainers(trainersResult.value);
+      } else {
+        loadErrors.push('Не удалось загрузить список тренеров.');
+      }
+
+      if (assignmentsResult.status === 'fulfilled') {
+        const nextAssignments = assignmentsResult.value.reduce<AssignmentMap>(
+          (accumulator, assignment) => {
+            accumulator[assignment.id] = {
+              trainerId: assignment.trainerId,
+              trainerName: assignment.trainerName,
+              date: assignment.date,
+              time: assignment.time,
+            };
+
+            return accumulator;
+          },
+          {},
+        );
+
+        setAssignments((currentAssignments) => ({
+          ...nextAssignments,
+          ...currentAssignments,
+        }));
+      } else {
+        loadErrors.push('Не удалось загрузить расписание Smart Start.');
+      }
+
+      setErrorMessage(loadErrors.join(' '));
+      setIsLoading(false);
+    };
+
+    void loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     boardScrollRef.current?.scrollTo({ left: 0 });
   }, [selectedMonth]);
+
+  const commitTrainer = async (
+    cellKey: string,
+    date: Date,
+    slot: string,
+    trainer: Trainer | null,
+  ) => {
+    const previousAssignment = assignments[cellKey] ?? null;
+    const nextAssignment =
+      trainer === null
+        ? null
+        : {
+            trainerId: trainer.id,
+            trainerName: getTrainerName(trainer),
+            date: getDateKey(date),
+            time: slot,
+          };
+
+    if (
+      previousAssignment?.trainerId === nextAssignment?.trainerId &&
+      previousAssignment?.trainerName === nextAssignment?.trainerName &&
+      previousAssignment?.date === nextAssignment?.date &&
+      previousAssignment?.time === nextAssignment?.time
+    ) {
+      return;
+    }
+
+    setSavingCells((currentSavingCells) => ({
+      ...currentSavingCells,
+      [cellKey]: true,
+    }));
+    setErrorMessage('');
+
+    setAssignments((currentAssignments) => {
+      const nextAssignments = { ...currentAssignments };
+
+      if (nextAssignment) {
+        nextAssignments[cellKey] = nextAssignment;
+      } else {
+        delete nextAssignments[cellKey];
+      }
+
+      return nextAssignments;
+    });
+
+    try {
+      if (nextAssignment && previousAssignment) {
+        await updateSmartStartAssignment(cellKey, nextAssignment);
+      } else if (nextAssignment) {
+        await createSmartStartAssignment({
+          id: cellKey,
+          ...nextAssignment,
+        });
+      } else if (previousAssignment) {
+        await deleteSmartStartAssignment(cellKey);
+      }
+    } catch {
+      if (nextAssignment) {
+        setErrorMessage('Не удалось сохранить тренера на сервере, но он останется после обновления.');
+      } else {
+        setErrorMessage('Не удалось удалить тренера на сервере, но изменение останется после обновления.');
+      }
+    } finally {
+      setSavingCells((currentSavingCells) => {
+        const nextSavingCells = { ...currentSavingCells };
+        delete nextSavingCells[cellKey];
+
+        return nextSavingCells;
+      });
+    }
+  };
+
+  const renderTrainerCell = (
+    cellKey: string,
+    date: Date,
+    slot: string,
+    savedAssignment: AssignmentMap[string] | null,
+    session: string | null,
+    variant: 'mobile' | 'desktop',
+  ) => {
+    const shouldShowTrainerField = session !== null || savedAssignment !== null;
+    const inputId = `${cellKey}-${variant}`;
+
+    return shouldShowTrainerField ? (
+      <div
+        className={`flex w-full min-w-0 flex-col gap-2 ${
+          variant === 'mobile' ? 'items-start justify-center min-h-12' : 'items-center justify-center min-h-20'
+        }`}
+      >
+        {session ? <span className={sessionBadgeClass}>{session}</span> : null}
+        <TrainerField
+          key={`${cellKey}-${savedAssignment?.trainerId ?? savedAssignment?.trainerName ?? 'empty'}`}
+          inputId={inputId}
+          selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
+          selectedTrainerId={savedAssignment?.trainerId ?? null}
+          trainerOptions={trainerOptions}
+          disabled={isLoading || trainerOptions.length === 0}
+          saving={savingCells[cellKey] === true}
+          onCommit={(trainer) => void commitTrainer(cellKey, date, slot, trainer)}
+        />
+      </div>
+    ) : (
+      <div className={variant === 'mobile' ? 'min-h-12' : 'min-h-20'} aria-hidden="true" />
+    );
+  };
 
   return (
     <section className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -180,7 +365,7 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
             <span className="h-0.5 w-5 rounded-full bg-current" />
           </button>
           <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-4xl">
-            DDX schedule
+            Расписание Федосеевский
           </h1>
         </header>
 
@@ -203,6 +388,12 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
             </select>
           </div>
         </div>
+
+        {errorMessage ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {errorMessage}
+          </div>
+        ) : null}
 
         <div ref={boardScrollRef} className="overflow-x-auto scroll-smooth snap-x snap-mandatory pb-2">
           <div className="flex gap-0">
@@ -259,9 +450,14 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
                                 <span className="text-[11px] font-black leading-tight text-slate-700">
                                   {slot}
                                 </span>
-                                <div className="flex min-h-7 items-start">
-                                  {renderSession(day.sessions[slotIndex])}
-                                </div>
+                                {renderTrainerCell(
+                                  smartStartCellKey(day.date, slot),
+                                  day.date,
+                                  slot,
+                                  assignments[smartStartCellKey(day.date, slot)] ?? null,
+                                  day.sessions[slotIndex],
+                                  'mobile',
+                                )}
                               </div>
                             ))}
                           </div>
@@ -338,9 +534,14 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
                                 key={`${week.id}-${day.label}-${slot}`}
                                 className="border-b border-r border-slate-200 px-3 py-3 text-center align-middle transition-colors group-hover:bg-slate-50/80"
                               >
-                                <div className="flex min-h-12 items-center justify-center">
-                                  {renderSession(day.sessions[slotIndex])}
-                                </div>
+                                {renderTrainerCell(
+                                  smartStartCellKey(day.date, slot),
+                                  day.date,
+                                  slot,
+                                  assignments[smartStartCellKey(day.date, slot)] ?? null,
+                                  day.sessions[slotIndex],
+                                  'desktop',
+                                )}
                               </td>
                             ))}
 
@@ -355,9 +556,14 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
                                 key={`${week.id}-${day.label}-${slot}`}
                                 className="border-b border-r border-slate-200 px-3 py-3 text-center align-middle transition-colors group-hover:bg-slate-50/80 last:border-r-0"
                               >
-                                <div className="flex min-h-12 items-center justify-center">
-                                  {renderSession(day.sessions[slotIndex])}
-                                </div>
+                                {renderTrainerCell(
+                                  smartStartCellKey(day.date, slot),
+                                  day.date,
+                                  slot,
+                                  assignments[smartStartCellKey(day.date, slot)] ?? null,
+                                  day.sessions[slotIndex],
+                                  'desktop',
+                                )}
                               </td>
                             ))}
                           </tr>

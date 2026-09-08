@@ -1,5 +1,101 @@
 {
-  "trainers": [
+  "trainers": [],
+  "introTrainingAssignments": [
+    {
+      "id": "irobFVPqMno",
+      "trainerId": null,
+      "trainerName": "1 2",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "umt25VDk8D0",
+      "trainerId": null,
+      "trainerName": "1 2",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "tX7moTTM9kI",
+      "trainerId": null,
+      "trainerName": "1 2",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "GIGYfc4798M",
+      "trainerId": null,
+      "trainerName": "1 2",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "eTGFClM7ZGc",
+      "trainerId": null,
+      "trainerName": "1 2",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "BYSbTHs3gdY",
+      "trainerId": null,
+      "trainerName": "1 2",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "r_LUaYI6G9Q",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-07",
+      "time": "13:00"
+    },
+    {
+      "id": "BYP7vw2zemo",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-07",
+      "time": "16:00"
+    },
+    {
+      "id": "pdvxeWdY4Pw",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-07",
+      "time": "10:00"
+    },
+    {
+      "id": "T5IkVRf4I_E",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-07",
+      "time": "10:00"
+    }
+  ],
+  "scheduleAssignments": [
+    {
+      "id": "_m5GHtQByJ8",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-06",
+      "time": "06:00 - 09:00"
+    }
+  ],
+  "smartStartAssignments": [
+    {
+      "id": "WYeBtIlFlm0",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-06",
+      "time": "10:00"
+    },
+    {
+      "id": "uO0CBRNH5os",
+      "trainerId": null,
+      "trainerName": "3 4",
+      "date": "2026-09-07",
+      "time": "14:00"
+    }
   ],
   "$schema": "./node_modules/json-server/schema.json"
 }

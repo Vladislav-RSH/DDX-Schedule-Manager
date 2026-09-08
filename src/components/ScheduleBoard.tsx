@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createScheduleAssignment, deleteScheduleAssignment, getScheduleAssignments, updateScheduleAssignment } from '../api/scheduleAssignments';
+import { getTrainers, type Trainer } from '../api/trainers';
+import TrainerField from './TrainerField';
+import {
+  buildTrainerOptions,
+  getAssignmentDisplayValue,
+  getDateKey,
+  getTrainerName,
+  loadStoredAssignments,
+  saveStoredAssignments,
+  type TrainerAssignmentMap,
+} from '../lib/trainerAssignmentUtils';
 
 type ScheduleDay = {
   label: string;
   date: Date;
-  cells: string[][];
 };
 
 type ScheduleWeek = {
@@ -16,6 +27,9 @@ type DayHeader = {
   date: string;
 };
 
+type AssignmentMap = TrainerAssignmentMap;
+type SavingMap = Record<string, boolean>;
+
 const timeSlots = [
   '06:00 - 09:00',
   '09:00 - 13:00',
@@ -26,6 +40,8 @@ const timeSlots = [
 
 const weekdayLabels = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 
+const scheduleAssignmentsStorageKey = 'ddx-schedule-assignments';
+
 const formatDayLabel = (date: Date) => {
   const weekday = weekdayLabels[date.getDay()];
   const day = String(date.getDate()).padStart(2, '0');
@@ -34,10 +50,9 @@ const formatDayLabel = (date: Date) => {
   return `${weekday} - ${day}.${month}`;
 };
 
-const createDay = (date: Date, filledCells: Record<number, string[]> = {}): ScheduleDay => ({
+const createDay = (date: Date): ScheduleDay => ({
   label: formatDayLabel(date),
   date,
-  cells: timeSlots.map((_, index) => filledCells[index] ?? []),
 });
 
 const splitDayLabel = (label: string): DayHeader => {
@@ -119,15 +134,8 @@ const monthOptions = Array.from({ length: 12 - currentMonthIndex }, (_, offset) 
 const getMonthWeeks = (weeks: ScheduleWeek[], monthIndex: number) =>
   weeks.filter((week) => week.days.some((day) => day.date.getMonth() === monthIndex));
 
-const assignmentBadgeClass =
-  'inline-flex w-fit max-w-full items-center rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold uppercase leading-none tracking-[0.08em] text-white break-words';
-
-const renderAssignments = (items: string[]) =>
-  items.map((item, index) => (
-    <span key={`${item}-${index}`} className={assignmentBadgeClass}>
-      {item}
-    </span>
-  ));
+const getCellKey = (date: Date, slot: string) =>
+  `schedule-${getDateKey(date)}-${slot.replace(/[^0-9]/g, '')}`;
 
 type ScheduleBoardProps = {
   onOpenSidebar: () => void;
@@ -135,16 +143,154 @@ type ScheduleBoardProps = {
 
 function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentMap>(() =>
+    loadStoredAssignments(scheduleAssignmentsStorageKey),
+  );
+  const [savingCells, setSavingCells] = useState<SavingMap>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
 
   const selectedMonthWeeks = useMemo(
     () => getMonthWeeks(currentYearWeeks, selectedMonth),
     [selectedMonth],
   );
+  const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
+
+  useEffect(() => {
+    saveStoredAssignments(scheduleAssignmentsStorageKey, assignments);
+  }, [assignments]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadData = async () => {
+      const [trainersResult, assignmentsResult] = await Promise.allSettled([
+        getTrainers(),
+        getScheduleAssignments(),
+      ]);
+
+      if (!isMounted) {
+        return;
+      }
+
+      const loadErrors: string[] = [];
+
+      if (trainersResult.status === 'fulfilled') {
+        setTrainers(trainersResult.value);
+      } else {
+        loadErrors.push('Не удалось загрузить список тренеров.');
+      }
+
+      if (assignmentsResult.status === 'fulfilled') {
+        const nextAssignments = assignmentsResult.value.reduce<AssignmentMap>(
+          (accumulator, assignment) => {
+            accumulator[assignment.id] = {
+              trainerId: assignment.trainerId,
+              trainerName: assignment.trainerName,
+              date: assignment.date,
+              time: assignment.time,
+            };
+
+            return accumulator;
+          },
+          {},
+        );
+
+        setAssignments((currentAssignments) => ({
+          ...nextAssignments,
+          ...currentAssignments,
+        }));
+      } else {
+        loadErrors.push('Не удалось загрузить расписание дежурств.');
+      }
+
+      setErrorMessage(loadErrors.join(' '));
+      setIsLoading(false);
+    };
+
+    void loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     boardScrollRef.current?.scrollTo({ left: 0 });
   }, [selectedMonth]);
+
+  const commitTrainer = async (
+    cellKey: string,
+    date: Date,
+    slot: string,
+    trainer: Trainer | null,
+  ) => {
+    const previousAssignment = assignments[cellKey] ?? null;
+    const nextAssignment =
+      trainer === null
+        ? null
+        : {
+            trainerId: trainer.id,
+            trainerName: getTrainerName(trainer),
+            date: getDateKey(date),
+            time: slot,
+          };
+
+    if (
+      previousAssignment?.trainerId === nextAssignment?.trainerId &&
+      previousAssignment?.trainerName === nextAssignment?.trainerName &&
+      previousAssignment?.date === nextAssignment?.date &&
+      previousAssignment?.time === nextAssignment?.time
+    ) {
+      return;
+    }
+
+    setSavingCells((currentSavingCells) => ({
+      ...currentSavingCells,
+      [cellKey]: true,
+    }));
+    setErrorMessage('');
+
+    setAssignments((currentAssignments) => {
+      const nextAssignments = { ...currentAssignments };
+
+      if (nextAssignment) {
+        nextAssignments[cellKey] = nextAssignment;
+      } else {
+        delete nextAssignments[cellKey];
+      }
+
+      return nextAssignments;
+    });
+
+    try {
+      if (nextAssignment && previousAssignment) {
+        await updateScheduleAssignment(cellKey, nextAssignment);
+      } else if (nextAssignment) {
+        await createScheduleAssignment({
+          id: cellKey,
+          ...nextAssignment,
+        });
+      } else if (previousAssignment) {
+        await deleteScheduleAssignment(cellKey);
+      }
+    } catch {
+      if (nextAssignment) {
+        setErrorMessage('Не удалось сохранить тренера на сервере, но он останется после обновления.');
+      } else {
+        setErrorMessage('Не удалось удалить тренера на сервере, но изменение останется после обновления.');
+      }
+    } finally {
+      setSavingCells((currentSavingCells) => {
+        const nextSavingCells = { ...currentSavingCells };
+        delete nextSavingCells[cellKey];
+
+        return nextSavingCells;
+      });
+    }
+  };
 
   return (
     <section className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
@@ -161,7 +307,7 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
             <span className="h-0.5 w-5 rounded-full bg-current" />
           </button>
           <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-4xl">
-            DDX schedule
+            Расписание Федосеевский
           </h1>
         </header>
 
@@ -184,6 +330,12 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
             </select>
           </div>
         </div>
+
+        {errorMessage ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {errorMessage}
+          </div>
+        ) : null}
 
         <div ref={boardScrollRef} className="overflow-x-auto scroll-smooth snap-x snap-mandatory pb-2">
           <div className="flex gap-0">
@@ -221,11 +373,12 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
                           <span className="shrink-0 rounded-full bg-[#ecfdff] px-2.5 py-1 text-[10px] font-semibold text-slate-600">
                             Day
                           </span>
-                        </div>
+                          </div>
 
-                        <div className="divide-y divide-slate-200">
-                          {timeSlots.map((slot, slotIndex) => {
-                            const cell = day.cells[slotIndex];
+                          <div className="divide-y divide-slate-200">
+                          {timeSlots.map((slot) => {
+                            const cellKey = getCellKey(day.date, slot);
+                            const savedAssignment = assignments[cellKey] ?? null;
 
                             return (
                               <div
@@ -235,10 +388,19 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
                                 <span className="text-[10px] font-black uppercase leading-tight tracking-[0.22em] text-slate-700">
                                   {slot}
                                 </span>
-                                <div className="flex min-h-6 flex-wrap gap-1.5">
-                                  {cell.length > 0 ? renderAssignments(cell) : (
-                                    <span className="text-[11px] text-slate-400">Свободно</span>
-                                  )}
+                                <div className="flex min-h-9 items-start">
+                                  <TrainerField
+                                    key={`${cellKey}-${savedAssignment?.trainerId ?? savedAssignment?.trainerName ?? 'empty'}`}
+                                    inputId={`${cellKey}-mobile`}
+                                    selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
+                                    selectedTrainerId={savedAssignment?.trainerId ?? null}
+                                    trainerOptions={trainerOptions}
+                                    disabled={isLoading || trainerOptions.length === 0}
+                                    saving={savingCells[cellKey] === true}
+                                    onCommit={(trainer) =>
+                                      void commitTrainer(cellKey, day.date, slot, trainer)
+                                    }
+                                  />
                                 </div>
                               </div>
                             );
@@ -277,7 +439,7 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
                     </thead>
 
                     <tbody>
-                      {timeSlots.map((slot, slotIndex) => (
+                      {timeSlots.map((slot) => (
                         <tr key={slot} className="group">
                           <th
                             scope="row"
@@ -287,20 +449,28 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
                           </th>
 
                           {week.days.map((day) => {
-                            const cell = day.cells[slotIndex];
+                            const cellKey = getCellKey(day.date, slot);
+                            const savedAssignment = assignments[cellKey] ?? null;
 
                             return (
                               <td
                                 key={`${week.id}-${day.label}-${slot}`}
                                 className="border-b border-r border-slate-200 px-3 py-3 align-top transition-colors group-hover:bg-slate-50/80 last:border-r-0"
                               >
-                                {cell.length > 0 ? (
-                                  <div className="flex min-h-16 flex-col gap-1">
-                                    {renderAssignments(cell)}
-                                  </div>
-                                ) : (
-                                  <div className="min-h-16" />
-                                )}
+                                <div className="flex min-h-16 items-center justify-center">
+                                  <TrainerField
+                                    key={`${cellKey}-${savedAssignment?.trainerId ?? savedAssignment?.trainerName ?? 'empty'}`}
+                                    inputId={`${cellKey}-desktop`}
+                                    selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
+                                    selectedTrainerId={savedAssignment?.trainerId ?? null}
+                                    trainerOptions={trainerOptions}
+                                    disabled={isLoading || trainerOptions.length === 0}
+                                    saving={savingCells[cellKey] === true}
+                                    onCommit={(trainer) =>
+                                      void commitTrainer(cellKey, day.date, slot, trainer)
+                                    }
+                                  />
+                                </div>
                               </td>
                             );
                           })}
