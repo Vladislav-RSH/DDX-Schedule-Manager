@@ -49,6 +49,10 @@ export const getAssignmentDisplayValue = (
     return '';
   }
 
+  if (!assignment.trainerId) {
+    return '';
+  }
+
   const matchedTrainer = trainerOptions.find((option) => option.trainer.id === assignment.trainerId);
 
   if (matchedTrainer) {

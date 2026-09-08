@@ -2,6 +2,7 @@ import {
   createCollectionId,
   deleteCollectionItem,
   loadCollection,
+  saveCollection,
   upsertCollectionItem,
 } from '../lib/browserStorage';
 import { supabase } from '../lib/supabaseClient';
@@ -31,6 +32,18 @@ type TrainerChange =
     };
 
 const TRAINERS_STORAGE_KEY = 'fedoseevsky-schedule-manager:trainers';
+const SCHEDULE_ASSIGNMENTS_STORAGE_KEY = 'fedoseevsky-schedule-manager:scheduleAssignments';
+const SMART_START_ASSIGNMENTS_STORAGE_KEY = 'fedoseevsky-schedule-manager:smartStartAssignments';
+const INTRO_TRAINING_ASSIGNMENTS_STORAGE_KEY =
+  'fedoseevsky-schedule-manager:introTrainingAssignments';
+
+type TrainerAssignmentRecord = {
+  id: string;
+  trainerId: string | null;
+  trainerName: string;
+  date: string;
+  time: string;
+};
 
 const mapRowToTrainer = (row: TrainerRow): Trainer => ({
   id: row.id,
@@ -93,8 +106,30 @@ export const createTrainer = async (trainer: TrainerPayload): Promise<Trainer> =
 
 export const deleteTrainer = async (trainerId: string) => {
   if (!supabase) {
+    const clearAssignments = (storageKey: string) => {
+      const assignments = loadCollection<TrainerAssignmentRecord>(storageKey);
+      const nextAssignments = assignments.filter((assignment) => assignment.trainerId !== trainerId);
+
+      saveCollection(storageKey, nextAssignments);
+    };
+
+    clearAssignments(SCHEDULE_ASSIGNMENTS_STORAGE_KEY);
+    clearAssignments(SMART_START_ASSIGNMENTS_STORAGE_KEY);
+    clearAssignments(INTRO_TRAINING_ASSIGNMENTS_STORAGE_KEY);
     deleteCollectionItem(TRAINERS_STORAGE_KEY, trainerId);
     return;
+  }
+
+  const [scheduleResult, smartStartResult, introResult] = await Promise.all([
+    supabase.from('schedule_assignments').delete().eq('trainer_id', trainerId),
+    supabase.from('smart_start_assignments').delete().eq('trainer_id', trainerId),
+    supabase.from('intro_training_assignments').delete().eq('trainer_id', trainerId),
+  ]);
+
+  const assignmentError = scheduleResult.error ?? smartStartResult.error ?? introResult.error;
+
+  if (assignmentError) {
+    throw assignmentError;
   }
 
   const { error } = await supabase.from('trainers').delete().eq('id', trainerId);
