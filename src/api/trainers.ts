@@ -6,42 +6,30 @@ export type Trainer = {
 
 type TrainerPayload = Pick<Trainer, 'firstName' | 'lastName'>;
 
-const TRAINERS_API_URL = 'http://localhost:3001/trainers';
+import {
+  createCollectionId,
+  deleteCollectionItem,
+  loadCollection,
+  upsertCollectionItem,
+} from '../lib/browserStorage';
 
-const assertResponse = async (response: Response) => {
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-};
+const TRAINERS_STORAGE_KEY = 'fedoseevsky-schedule-manager:trainers';
 
 export const getTrainers = async (): Promise<Trainer[]> => {
-  const response = await fetch(TRAINERS_API_URL);
-  await assertResponse(response);
-
-  return response.json() as Promise<Trainer[]>;
+  return loadCollection<Trainer>(TRAINERS_STORAGE_KEY);
 };
 
 export const createTrainer = async (trainer: TrainerPayload): Promise<Trainer> => {
-  const response = await fetch(TRAINERS_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      id: `trainer-${Date.now()}`,
-      ...trainer,
-    }),
-  });
+  const nextTrainer: Trainer = {
+    id: createCollectionId('trainer'),
+    ...trainer,
+  };
 
-  await assertResponse(response);
+  upsertCollectionItem<Trainer>(TRAINERS_STORAGE_KEY, nextTrainer);
 
-  return response.json() as Promise<Trainer>;
+  return nextTrainer;
 };
 
 export const deleteTrainer = async (trainerId: string) => {
-  const response = await fetch(`${TRAINERS_API_URL}/${trainerId}`, {
-    method: 'DELETE',
-  });
-
-  await assertResponse(response);
+  deleteCollectionItem(TRAINERS_STORAGE_KEY, trainerId);
 };

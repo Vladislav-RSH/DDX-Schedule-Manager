@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/DDX-Schedule-Manager/',
   plugins: [
     react(),
     tailwindcss(),

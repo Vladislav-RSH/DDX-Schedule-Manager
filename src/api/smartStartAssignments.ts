@@ -1,4 +1,10 @@
 import type { TrainerAssignmentRecord } from '../lib/trainerAssignmentUtils';
+import {
+  deleteCollectionItem,
+  loadCollection,
+  replaceCollectionItem,
+  upsertCollectionItem,
+} from '../lib/browserStorage';
 
 export type SmartStartAssignment = TrainerAssignmentRecord & {
   id: string;
@@ -6,68 +12,31 @@ export type SmartStartAssignment = TrainerAssignmentRecord & {
 
 type SmartStartAssignmentPayload = Omit<SmartStartAssignment, 'id'>;
 
-const SMART_START_ASSIGNMENTS_API_URL = 'http://localhost:3001/smartStartAssignments';
-
-const assertResponse = async (response: Response) => {
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-};
+const SMART_START_ASSIGNMENTS_STORAGE_KEY = 'fedoseevsky-schedule-manager:smartStartAssignments';
 
 export const getSmartStartAssignments = async (): Promise<SmartStartAssignment[]> => {
-  const response = await fetch(SMART_START_ASSIGNMENTS_API_URL);
-  await assertResponse(response);
-
-  return response.json() as Promise<SmartStartAssignment[]>;
+  return loadCollection<SmartStartAssignment>(SMART_START_ASSIGNMENTS_STORAGE_KEY);
 };
 
 export const createSmartStartAssignment = async (
   assignment: SmartStartAssignment,
 ): Promise<SmartStartAssignment> => {
-  const response = await fetch(SMART_START_ASSIGNMENTS_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(assignment),
-  });
+  upsertCollectionItem<SmartStartAssignment>(SMART_START_ASSIGNMENTS_STORAGE_KEY, assignment);
 
-  await assertResponse(response);
-
-  return response.json() as Promise<SmartStartAssignment>;
+  return assignment;
 };
 
 export const updateSmartStartAssignment = async (
   assignmentId: string,
   assignment: SmartStartAssignmentPayload,
 ): Promise<SmartStartAssignment> => {
-  const response = await fetch(
-    `${SMART_START_ASSIGNMENTS_API_URL}/${encodeURIComponent(assignmentId)}`,
-    {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(assignment),
-    },
+  return replaceCollectionItem<SmartStartAssignment>(
+    SMART_START_ASSIGNMENTS_STORAGE_KEY,
+    assignmentId,
+    assignment,
   );
-
-  await assertResponse(response);
-
-  return response.json() as Promise<SmartStartAssignment>;
 };
 
 export const deleteSmartStartAssignment = async (assignmentId: string) => {
-  const response = await fetch(
-    `${SMART_START_ASSIGNMENTS_API_URL}/${encodeURIComponent(assignmentId)}`,
-    {
-      method: 'DELETE',
-    },
-  );
-
-  if (response.status === 404) {
-    return;
-  }
-
-  await assertResponse(response);
+  deleteCollectionItem(SMART_START_ASSIGNMENTS_STORAGE_KEY, assignmentId);
 };

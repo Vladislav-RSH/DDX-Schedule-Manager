@@ -1,4 +1,10 @@
 import type { TrainerAssignmentRecord } from '../lib/trainerAssignmentUtils';
+import {
+  deleteCollectionItem,
+  loadCollection,
+  replaceCollectionItem,
+  upsertCollectionItem,
+} from '../lib/browserStorage';
 
 export type ScheduleAssignment = TrainerAssignmentRecord & {
   id: string;
@@ -6,62 +12,31 @@ export type ScheduleAssignment = TrainerAssignmentRecord & {
 
 type ScheduleAssignmentPayload = Omit<ScheduleAssignment, 'id'>;
 
-const SCHEDULE_ASSIGNMENTS_API_URL = 'http://localhost:3001/scheduleAssignments';
-
-const assertResponse = async (response: Response) => {
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-};
+const SCHEDULE_ASSIGNMENTS_STORAGE_KEY = 'fedoseevsky-schedule-manager:scheduleAssignments';
 
 export const getScheduleAssignments = async (): Promise<ScheduleAssignment[]> => {
-  const response = await fetch(SCHEDULE_ASSIGNMENTS_API_URL);
-  await assertResponse(response);
-
-  return response.json() as Promise<ScheduleAssignment[]>;
+  return loadCollection<ScheduleAssignment>(SCHEDULE_ASSIGNMENTS_STORAGE_KEY);
 };
 
 export const createScheduleAssignment = async (
   assignment: ScheduleAssignment,
 ): Promise<ScheduleAssignment> => {
-  const response = await fetch(SCHEDULE_ASSIGNMENTS_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(assignment),
-  });
+  upsertCollectionItem<ScheduleAssignment>(SCHEDULE_ASSIGNMENTS_STORAGE_KEY, assignment);
 
-  await assertResponse(response);
-
-  return response.json() as Promise<ScheduleAssignment>;
+  return assignment;
 };
 
 export const updateScheduleAssignment = async (
   assignmentId: string,
   assignment: ScheduleAssignmentPayload,
 ): Promise<ScheduleAssignment> => {
-  const response = await fetch(`${SCHEDULE_ASSIGNMENTS_API_URL}/${encodeURIComponent(assignmentId)}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(assignment),
-  });
-
-  await assertResponse(response);
-
-  return response.json() as Promise<ScheduleAssignment>;
+  return replaceCollectionItem<ScheduleAssignment>(
+    SCHEDULE_ASSIGNMENTS_STORAGE_KEY,
+    assignmentId,
+    assignment,
+  );
 };
 
 export const deleteScheduleAssignment = async (assignmentId: string) => {
-  const response = await fetch(`${SCHEDULE_ASSIGNMENTS_API_URL}/${encodeURIComponent(assignmentId)}`, {
-    method: 'DELETE',
-  });
-
-  if (response.status === 404) {
-    return;
-  }
-
-  await assertResponse(response);
+  deleteCollectionItem(SCHEDULE_ASSIGNMENTS_STORAGE_KEY, assignmentId);
 };
