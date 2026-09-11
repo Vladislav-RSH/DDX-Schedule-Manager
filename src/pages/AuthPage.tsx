@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, hasSupabaseConfig } from '../lib/supabaseClient';
-import { getTelegramAuthRedirectUrl, telegramAuthProvider } from '../lib/auth';
+import { telegramAuthProvider } from '../lib/auth';
 
 type AuthPageProps = {
   onOpenSidebar: () => void;
@@ -31,9 +31,6 @@ function AuthPage({ onOpenSidebar, session }: AuthPageProps) {
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: telegramAuthProvider,
-        options: {
-          redirectTo: getTelegramAuthRedirectUrl(),
-        },
       });
 
       if (error) {
