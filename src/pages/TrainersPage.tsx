@@ -1,5 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
+  getIntroTrainingAssignments,
+  subscribeToIntroTrainingAssignments,
+} from '../api/introTrainingAssignments';
+import {
+  getScheduleAssignments,
+  subscribeToScheduleAssignments,
+} from '../api/scheduleAssignments';
+import {
+  getSmartStartAssignments,
+  subscribeToSmartStartAssignments,
+} from '../api/smartStartAssignments';
+import {
   createTrainer,
   deleteTrainer,
   getTrainers,
@@ -15,8 +27,92 @@ type TrainersPageProps = {
 const getTrainerName = (trainer: Trainer) =>
   [trainer.lastName, trainer.firstName].filter(Boolean).join(' ') || 'Без имени';
 
+type CountableAssignment = {
+  trainerId: string | null;
+  date: string;
+};
+
+type TrainerMonthlyStats = {
+  schedule: number;
+  smartStart: number;
+  introTraining: number;
+};
+
+type TrainerMonthlyStatsMap = Record<string, TrainerMonthlyStats>;
+
+const emptyMonthlyStats: TrainerMonthlyStats = {
+  schedule: 0,
+  smartStart: 0,
+  introTraining: 0,
+};
+
+const formatDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+
+const now = new Date();
+const currentMonthStart = formatDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
+const nextMonthStart = formatDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+
+const isCurrentMonthAssignment = (assignment: CountableAssignment) =>
+  assignment.date >= currentMonthStart && assignment.date < nextMonthStart;
+
+const addAssignmentsToStats = (
+  stats: TrainerMonthlyStatsMap,
+  assignments: CountableAssignment[],
+  key: keyof TrainerMonthlyStats,
+) => {
+  assignments.forEach((assignment) => {
+    if (!assignment.trainerId || !isCurrentMonthAssignment(assignment)) {
+      return;
+    }
+
+    stats[assignment.trainerId] = {
+      ...(stats[assignment.trainerId] ?? emptyMonthlyStats),
+      [key]: (stats[assignment.trainerId]?.[key] ?? 0) + 1,
+    };
+  });
+};
+
+const buildMonthlyStats = (
+  scheduleAssignments: CountableAssignment[],
+  smartStartAssignments: CountableAssignment[],
+  introTrainingAssignments: CountableAssignment[],
+) => {
+  const stats: TrainerMonthlyStatsMap = {};
+
+  addAssignmentsToStats(stats, scheduleAssignments, 'schedule');
+  addAssignmentsToStats(stats, smartStartAssignments, 'smartStart');
+  addAssignmentsToStats(stats, introTrainingAssignments, 'introTraining');
+
+  return stats;
+};
+
+const getMonthlyStats = async () => {
+  const [scheduleAssignments, smartStartAssignments, introTrainingAssignments] = await Promise.all([
+    getScheduleAssignments(),
+    getSmartStartAssignments(),
+    getIntroTrainingAssignments(),
+  ]);
+
+  return buildMonthlyStats(scheduleAssignments, smartStartAssignments, introTrainingAssignments);
+};
+
+function MonthlyStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex min-h-10 items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 sm:min-h-0 sm:justify-center sm:bg-transparent sm:px-1 sm:py-0">
+      <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:hidden">
+        {label}
+      </span>
+      <span className="text-sm font-black tabular-nums text-slate-950">{value}</span>
+    </div>
+  );
+}
+
 function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
   const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [monthlyStats, setMonthlyStats] = useState<TrainerMonthlyStatsMap>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,26 +126,51 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
   useEffect(() => {
     let isMounted = true;
 
-    const loadTrainers = async () => {
-      try {
-        const loadedTrainers = await getTrainers();
+    const reloadMonthlyStats = async () => {
+      const stats = await getMonthlyStats();
 
-        if (isMounted) {
-          setTrainers(loadedTrainers);
-          setErrorMessage('');
-        }
-      } catch {
-        if (isMounted) {
-          setErrorMessage('Не удалось загрузить список тренеров.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+      if (isMounted) {
+        setMonthlyStats(stats);
       }
     };
 
-    void loadTrainers();
+    const loadPageData = async () => {
+      const [trainersResult, statsResult] = await Promise.allSettled([
+        getTrainers(),
+        getMonthlyStats(),
+      ]);
+
+      if (!isMounted) {
+        return;
+      }
+
+      const loadErrors: string[] = [];
+
+      if (trainersResult.status === 'fulfilled') {
+        setTrainers(trainersResult.value);
+      } else {
+        loadErrors.push('Не удалось загрузить список тренеров.');
+      }
+
+      if (statsResult.status === 'fulfilled') {
+        setMonthlyStats(statsResult.value);
+      } else {
+        loadErrors.push('Не удалось загрузить статистику за текущий месяц.');
+      }
+
+      setErrorMessage(loadErrors.join(' '));
+      setIsLoading(false);
+    };
+
+    void loadPageData();
+
+    const handleAssignmentsChange = () => {
+      void reloadMonthlyStats().catch(() => {
+        if (isMounted) {
+          setErrorMessage('Не удалось обновить статистику за текущий месяц.');
+        }
+      });
+    };
 
     const unsubscribeTrainers = subscribeToTrainers((change) => {
       if (!isMounted) {
@@ -67,10 +188,17 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
         ]);
       });
     });
+    const unsubscribeScheduleAssignments = subscribeToScheduleAssignments(handleAssignmentsChange);
+    const unsubscribeSmartStartAssignments = subscribeToSmartStartAssignments(handleAssignmentsChange);
+    const unsubscribeIntroTrainingAssignments =
+      subscribeToIntroTrainingAssignments(handleAssignmentsChange);
 
     return () => {
       isMounted = false;
       unsubscribeTrainers();
+      unsubscribeScheduleAssignments();
+      unsubscribeSmartStartAssignments();
+      unsubscribeIntroTrainingAssignments();
     };
   }, []);
 
@@ -124,7 +252,7 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
 
   return (
     <section className="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <button
@@ -212,8 +340,11 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
         ) : null}
 
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="hidden grid-cols-[minmax(0,1fr)_8rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-[0.24em] text-slate-500 sm:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_7rem_7rem_8.5rem_8rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-slate-500 sm:grid">
             <span>Тренер</span>
+            <span className="text-center">Дежурства</span>
+            <span className="text-center">Smart Start</span>
+            <span className="text-center">Ознакомит.</span>
             <span className="text-right">Действие</span>
           </div>
 
@@ -221,27 +352,35 @@ function TrainersPage({ onOpenSidebar }: TrainersPageProps) {
             <div className="px-4 py-8 text-sm font-semibold text-slate-500">Загрузка</div>
           ) : (
             <ul className="divide-y divide-slate-200">
-              {trainers.map((trainer) => (
-                <li
-                  key={trainer.id}
-                  className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-950">
-                      {getTrainerName(trainer)}
-                    </p>
-                  </div>
+              {trainers.map((trainer) => {
+                const stats = monthlyStats[trainer.id] ?? emptyMonthlyStats;
 
-                  <button
-                    type="button"
-                    className="h-9 rounded-lg border border-red-200 bg-white px-3 text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:justify-self-end"
-                    disabled={deletingTrainerId === trainer.id}
-                    onClick={() => void handleDelete(trainer)}
+                return (
+                  <li
+                    key={trainer.id}
+                    className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_7rem_7rem_8.5rem_8rem] sm:items-center"
                   >
-                    {deletingTrainerId === trainer.id ? 'Удаление' : 'Удалить'}
-                  </button>
-                </li>
-              ))}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-950">
+                        {getTrainerName(trainer)}
+                      </p>
+                    </div>
+
+                    <MonthlyStat label="Дежурства" value={stats.schedule} />
+                    <MonthlyStat label="Smart Start" value={stats.smartStart} />
+                    <MonthlyStat label="Ознакомит." value={stats.introTraining} />
+
+                    <button
+                      type="button"
+                      className="h-9 rounded-lg border border-red-200 bg-white px-3 text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:justify-self-end"
+                      disabled={deletingTrainerId === trainer.id}
+                      onClick={() => void handleDelete(trainer)}
+                    >
+                      {deletingTrainerId === trainer.id ? 'Удаление' : 'Удалить'}
+                    </button>
+                  </li>
+                );
+              })}
 
               {trainers.length === 0 ? (
                 <li className="px-4 py-8 text-sm font-semibold text-slate-500">
