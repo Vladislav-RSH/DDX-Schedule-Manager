@@ -205,6 +205,7 @@ type TrainerFieldProps = {
   trainerOptions: TrainerOption[];
   disabled: boolean;
   saving: boolean;
+  readOnly?: boolean;
   onCommit: (trainer: Trainer | null) => void;
 };
 
@@ -215,6 +216,7 @@ function TrainerField({
   trainerOptions,
   disabled,
   saving,
+  readOnly = false,
   onCommit,
 }: TrainerFieldProps) {
   const [query, setQuery] = useState(selectedValue);
@@ -353,6 +355,14 @@ function TrainerField({
     }
   };
 
+  if (readOnly) {
+    return (
+      <div className="flex min-h-9 w-full min-w-0 items-center justify-center px-2 text-center text-[11px] font-bold text-slate-950">
+        {selectedValue}
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="relative w-full min-w-0">
       <input
@@ -418,9 +428,10 @@ function TrainerField({
 
 type IntroTrainingBoardProps = {
   onOpenSidebar: () => void;
+  canManage: boolean;
 };
 
-function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
+function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [assignments, setAssignments] = useState<AssignmentMap>({});
@@ -442,7 +453,7 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
     const loadData = async () => {
       try {
         const [loadedTrainers, loadedAssignments] = await Promise.all([
-          getTrainers(),
+          canManage ? getTrainers() : Promise.resolve([] as Trainer[]),
           getIntroTrainingAssignments(),
         ]);
 
@@ -477,22 +488,24 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
 
     void loadData();
 
-    const unsubscribeTrainers = subscribeToTrainers((change) => {
-      if (!isMounted) {
-        return;
-      }
+    const unsubscribeTrainers = canManage
+      ? subscribeToTrainers((change) => {
+          if (!isMounted) {
+            return;
+          }
 
-      setTrainers((currentTrainers) => {
-        if (change.type === 'delete') {
-          return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
-        }
+          setTrainers((currentTrainers) => {
+            if (change.type === 'delete') {
+              return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
+            }
 
-        return sortTrainers([
-          ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
-          change.trainer,
-        ]);
-      });
-    });
+            return sortTrainers([
+              ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
+              change.trainer,
+            ]);
+          });
+        })
+      : () => {};
 
     const unsubscribeAssignments = subscribeToIntroTrainingAssignments((change) => {
       if (!isMounted) {
@@ -517,7 +530,7 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
       unsubscribeTrainers();
       unsubscribeAssignments();
     };
-  }, []);
+  }, [canManage]);
 
   useEffect(() => {
     boardScrollRef.current?.scrollTo({ left: 0 });
@@ -529,6 +542,10 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
     slot: string,
     trainer: Trainer | null,
   ) => {
+    if (!canManage) {
+      return;
+    }
+
     const previousAssignment = assignments[cellKey] ?? null;
     const nextAssignment =
       trainer === null
@@ -703,8 +720,9 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
                                       selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                       selectedTrainerId={savedAssignment?.trainerId ?? null}
                                       trainerOptions={trainerOptions}
-                                      disabled={isLoading || trainerOptions.length === 0}
+                                      disabled={!canManage || isLoading || trainerOptions.length === 0}
                                       saving={savingCells[cellKey] === true}
+                                      readOnly={!canManage}
                                       onCommit={(trainer) =>
                                         void commitTrainer(cellKey, day.date, slot, trainer)
                                       }
@@ -798,8 +816,9 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
                                       selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                       selectedTrainerId={savedAssignment?.trainerId ?? null}
                                       trainerOptions={trainerOptions}
-                                      disabled={isLoading || trainerOptions.length === 0}
+                                      disabled={!canManage || isLoading || trainerOptions.length === 0}
                                       saving={savingCells[cellKey] === true}
+                                      readOnly={!canManage}
                                       onCommit={(trainer) =>
                                         void commitTrainer(cellKey, day.date, slot, trainer)
                                       }
@@ -831,8 +850,9 @@ function IntroTrainingBoard({ onOpenSidebar }: IntroTrainingBoardProps) {
                                       selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                       selectedTrainerId={savedAssignment?.trainerId ?? null}
                                       trainerOptions={trainerOptions}
-                                      disabled={isLoading || trainerOptions.length === 0}
+                                      disabled={!canManage || isLoading || trainerOptions.length === 0}
                                       saving={savingCells[cellKey] === true}
+                                      readOnly={!canManage}
                                       onCommit={(trainer) =>
                                         void commitTrainer(cellKey, day.date, slot, trainer)
                                       }

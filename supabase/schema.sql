@@ -68,10 +68,10 @@ create policy "Authenticated delete trainers"
 
 drop policy if exists "Public read schedule assignments" on public.schedule_assignments;
 drop policy if exists "Authenticated read schedule assignments" on public.schedule_assignments;
-create policy "Authenticated read schedule assignments"
+create policy "Public read schedule assignments"
   on public.schedule_assignments
   for select
-  using (auth.role() = 'authenticated');
+  using (true);
 
 drop policy if exists "Public write schedule assignments" on public.schedule_assignments;
 drop policy if exists "Authenticated write schedule assignments" on public.schedule_assignments;
@@ -97,10 +97,10 @@ create policy "Authenticated delete schedule assignments"
 
 drop policy if exists "Public read smart start assignments" on public.smart_start_assignments;
 drop policy if exists "Authenticated read smart start assignments" on public.smart_start_assignments;
-create policy "Authenticated read smart start assignments"
+create policy "Public read smart start assignments"
   on public.smart_start_assignments
   for select
-  using (auth.role() = 'authenticated');
+  using (true);
 
 drop policy if exists "Public write smart start assignments" on public.smart_start_assignments;
 drop policy if exists "Authenticated write smart start assignments" on public.smart_start_assignments;
@@ -126,10 +126,10 @@ create policy "Authenticated delete smart start assignments"
 
 drop policy if exists "Public read intro training assignments" on public.intro_training_assignments;
 drop policy if exists "Authenticated read intro training assignments" on public.intro_training_assignments;
-create policy "Authenticated read intro training assignments"
+create policy "Public read intro training assignments"
   on public.intro_training_assignments
   for select
-  using (auth.role() = 'authenticated');
+  using (true);
 
 drop policy if exists "Public write intro training assignments" on public.intro_training_assignments;
 drop policy if exists "Authenticated write intro training assignments" on public.intro_training_assignments;

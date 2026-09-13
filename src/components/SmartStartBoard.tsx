@@ -165,9 +165,10 @@ const smartStartCellKey = (date: Date, slot: string) =>
 
 type SmartStartBoardProps = {
   onOpenSidebar: () => void;
+  canManage: boolean;
 };
 
-function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
+function SmartStartBoard({ onOpenSidebar, canManage }: SmartStartBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [assignments, setAssignments] = useState<AssignmentMap>({});
@@ -187,7 +188,7 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
 
     const loadData = async () => {
       const [trainersResult, assignmentsResult] = await Promise.allSettled([
-        getTrainers(),
+        canManage ? getTrainers() : Promise.resolve([] as Trainer[]),
         getSmartStartAssignments(),
       ]);
 
@@ -199,7 +200,7 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
 
       if (trainersResult.status === 'fulfilled') {
         setTrainers(sortTrainers(trainersResult.value));
-      } else {
+      } else if (canManage) {
         loadErrors.push('Не удалось загрузить список тренеров.');
       }
 
@@ -229,22 +230,24 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
 
     void loadData();
 
-    const unsubscribeTrainers = subscribeToTrainers((change) => {
-      if (!isMounted) {
-        return;
-      }
+    const unsubscribeTrainers = canManage
+      ? subscribeToTrainers((change) => {
+          if (!isMounted) {
+            return;
+          }
 
-      setTrainers((currentTrainers) => {
-        if (change.type === 'delete') {
-          return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
-        }
+          setTrainers((currentTrainers) => {
+            if (change.type === 'delete') {
+              return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
+            }
 
-        return sortTrainers([
-          ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
-          change.trainer,
-        ]);
-      });
-    });
+            return sortTrainers([
+              ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
+              change.trainer,
+            ]);
+          });
+        })
+      : () => {};
 
     const unsubscribeAssignments = subscribeToSmartStartAssignments((change) => {
       if (!isMounted) {
@@ -269,7 +272,7 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
       unsubscribeTrainers();
       unsubscribeAssignments();
     };
-  }, []);
+  }, [canManage]);
 
   useEffect(() => {
     boardScrollRef.current?.scrollTo({ left: 0 });
@@ -281,6 +284,10 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
     slot: string,
     trainer: Trainer | null,
   ) => {
+    if (!canManage) {
+      return;
+    }
+
     const previousAssignment = assignments[cellKey] ?? null;
     const nextAssignment =
       trainer === null
@@ -370,8 +377,9 @@ function SmartStartBoard({ onOpenSidebar }: SmartStartBoardProps) {
           selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
           selectedTrainerId={savedAssignment?.trainerId ?? null}
           trainerOptions={trainerOptions}
-          disabled={isLoading || trainerOptions.length === 0}
+          disabled={!canManage || isLoading || trainerOptions.length === 0}
           saving={savingCells[cellKey] === true}
+          readOnly={!canManage}
           onCommit={(trainer) => void commitTrainer(cellKey, date, slot, trainer)}
         />
       </div>

@@ -1,4 +1,4 @@
-name: Deploy GitHub Pages
+name: Build and deploy GitHub Pages
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -24,22 +25,41 @@ jobs:
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Check Supabase configuration
+        shell: bash
+        run: |
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then
+            echo "::error::Repository secret VITE_SUPABASE_URL is not configured."
+            exit 1
+          fi
+
+          if [ -z "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ] && [ -z "${VITE_SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::Configure VITE_SUPABASE_PUBLISHABLE_KEY or VITE_SUPABASE_ANON_KEY repository secret."
+            exit 1
+          fi
+
+      - name: Lint
+        run: npm run lint
 
       - name: Build
         run: npm run build
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
@@ -52,4 +72,4 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

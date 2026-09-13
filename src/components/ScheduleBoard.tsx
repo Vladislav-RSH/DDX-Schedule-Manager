@@ -141,9 +141,10 @@ const getCellKey = (date: Date, slot: string) =>
 
 type ScheduleBoardProps = {
   onOpenSidebar: () => void;
+  canManage: boolean;
 };
 
-function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
+function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthIndex);
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [assignments, setAssignments] = useState<AssignmentMap>({});
@@ -163,7 +164,7 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
 
     const loadData = async () => {
       const [trainersResult, assignmentsResult] = await Promise.allSettled([
-        getTrainers(),
+        canManage ? getTrainers() : Promise.resolve([] as Trainer[]),
         getScheduleAssignments(),
       ]);
 
@@ -175,7 +176,7 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
 
       if (trainersResult.status === 'fulfilled') {
         setTrainers(sortTrainers(trainersResult.value));
-      } else {
+      } else if (canManage) {
         loadErrors.push('Не удалось загрузить список тренеров.');
       }
 
@@ -205,22 +206,24 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
 
     void loadData();
 
-    const unsubscribeTrainers = subscribeToTrainers((change) => {
-      if (!isMounted) {
-        return;
-      }
+    const unsubscribeTrainers = canManage
+      ? subscribeToTrainers((change) => {
+          if (!isMounted) {
+            return;
+          }
 
-      setTrainers((currentTrainers) => {
-        if (change.type === 'delete') {
-          return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
-        }
+          setTrainers((currentTrainers) => {
+            if (change.type === 'delete') {
+              return currentTrainers.filter((trainer) => trainer.id !== change.trainerId);
+            }
 
-        return sortTrainers([
-          ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
-          change.trainer,
-        ]);
-      });
-    });
+            return sortTrainers([
+              ...currentTrainers.filter((trainer) => trainer.id !== change.trainer.id),
+              change.trainer,
+            ]);
+          });
+        })
+      : () => {};
 
     const unsubscribeAssignments = subscribeToScheduleAssignments((change) => {
       if (!isMounted) {
@@ -245,7 +248,7 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
       unsubscribeTrainers();
       unsubscribeAssignments();
     };
-  }, []);
+  }, [canManage]);
 
   useEffect(() => {
     boardScrollRef.current?.scrollTo({ left: 0 });
@@ -257,6 +260,10 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
     slot: string,
     trainer: Trainer | null,
   ) => {
+    if (!canManage) {
+      return;
+    }
+
     const previousAssignment = assignments[cellKey] ?? null;
     const nextAssignment =
       trainer === null
@@ -425,8 +432,9 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
                                     selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                     selectedTrainerId={savedAssignment?.trainerId ?? null}
                                     trainerOptions={trainerOptions}
-                                    disabled={isLoading || trainerOptions.length === 0}
+                                    disabled={!canManage || isLoading || trainerOptions.length === 0}
                                     saving={savingCells[cellKey] === true}
+                                    readOnly={!canManage}
                                     onCommit={(trainer) =>
                                       void commitTrainer(cellKey, day.date, slot, trainer)
                                     }
@@ -494,8 +502,9 @@ function ScheduleBoard({ onOpenSidebar }: ScheduleBoardProps) {
                                     selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                     selectedTrainerId={savedAssignment?.trainerId ?? null}
                                     trainerOptions={trainerOptions}
-                                    disabled={isLoading || trainerOptions.length === 0}
+                                    disabled={!canManage || isLoading || trainerOptions.length === 0}
                                     saving={savingCells[cellKey] === true}
+                                    readOnly={!canManage}
                                     onCommit={(trainer) =>
                                       void commitTrainer(cellKey, day.date, slot, trainer)
                                     }

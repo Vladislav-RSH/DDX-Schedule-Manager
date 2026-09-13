@@ -25,10 +25,15 @@ type SidebarProps = {
   isOpen: boolean;
   currentPage: string;
   onClose: () => void;
+  isAdmin: boolean;
   onSignOut: () => void;
 };
 
-function Sidebar({ isOpen, currentPage, onClose, onSignOut }: SidebarProps) {
+function Sidebar({ isOpen, currentPage, onClose, isAdmin, onSignOut }: SidebarProps) {
+  const visibleNavigationItems = navigationItems.filter(
+    (item) => item.id !== 'trainers' || isAdmin,
+  );
+
   return (
     <>
       {isOpen ? (
@@ -60,7 +65,7 @@ function Sidebar({ isOpen, currentPage, onClose, onSignOut }: SidebarProps) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-2 p-4">
-          {navigationItems.map((item) => {
+          {visibleNavigationItems.map((item) => {
             const isActive = item.id === currentPage;
 
             return (
@@ -81,18 +86,20 @@ function Sidebar({ isOpen, currentPage, onClose, onSignOut }: SidebarProps) {
           })}
         </nav>
 
-        <div className="border-t border-slate-200 p-4">
-          <button
-            type="button"
-            className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-[#ff6a00]/30"
-            onClick={() => {
-              onSignOut();
-              onClose();
-            }}
-          >
-            Выйти
-          </button>
-        </div>
+        {isAdmin ? (
+          <div className="border-t border-slate-200 p-4">
+            <button
+              type="button"
+              className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-[#ff6a00]/30"
+              onClick={() => {
+                onSignOut();
+                onClose();
+              }}
+            >
+              Выйти
+            </button>
+          </div>
+        ) : null}
       </aside>
     </>
   );

@@ -21,6 +21,7 @@ type TrainerFieldProps = {
   trainerOptions: TrainerOption[];
   disabled: boolean;
   saving: boolean;
+  readOnly?: boolean;
   onCommit: (trainer: Trainer | null) => void;
 };
 
@@ -31,6 +32,7 @@ function TrainerField({
   trainerOptions,
   disabled,
   saving,
+  readOnly = false,
   onCommit,
 }: TrainerFieldProps) {
   const [query, setQuery] = useState(selectedValue);
@@ -169,6 +171,14 @@ function TrainerField({
       setQuery(selectedValue);
     }
   };
+
+  if (readOnly) {
+    return (
+      <div className="flex min-h-9 w-full min-w-0 items-center justify-center px-2 text-center text-[11px] font-bold text-slate-950">
+        {selectedValue}
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="relative w-full min-w-0">

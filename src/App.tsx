@@ -32,6 +32,7 @@ function App() {
   const [session, setSession] = useState<Session | null | undefined>(() =>
     supabase ? undefined : null,
   );
+  const isAdminLoginRoute = window.location.hash === '#/admin';
 
   useEffect(() => {
     const handleHashChange = () => setCurrentPage(getCurrentPage());
@@ -68,6 +69,18 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (session && isAdminLoginRoute) {
+      window.location.hash = '#/trainers';
+    }
+  }, [isAdminLoginRoute, session]);
+
+  useEffect(() => {
+    if (session === null && window.location.hash === '#/trainers') {
+      window.location.hash = '#/';
+    }
+  }, [session]);
+
   const handleOpenSidebar = () => setIsSidebarOpen(true);
   const handleSignOut = () => {
     if (supabase) {
@@ -83,27 +96,31 @@ function App() {
     );
   }
 
-  if (!session) {
+  if (isAdminLoginRoute && !session) {
     return <AuthPage />;
   }
+
+  const canManage = Boolean(session);
+  const visiblePage = !canManage && currentPage === 'trainers' ? 'schedule' : currentPage;
 
   return (
     <main className="min-h-screen bg-[#f5f7fb]">
       <Sidebar
         isOpen={isSidebarOpen}
-        currentPage={currentPage}
+        currentPage={visiblePage}
         onClose={() => setIsSidebarOpen(false)}
+        isAdmin={canManage}
         onSignOut={handleSignOut}
       />
 
-      {currentPage === 'trainers' ? (
+      {visiblePage === 'trainers' ? (
         <TrainersPage onOpenSidebar={handleOpenSidebar} />
-      ) : currentPage === 'smart-start' ? (
-        <SmartStartPage onOpenSidebar={handleOpenSidebar} />
-      ) : currentPage === 'intro-training' ? (
-        <IntroTrainingPage onOpenSidebar={handleOpenSidebar} />
+      ) : visiblePage === 'smart-start' ? (
+        <SmartStartPage onOpenSidebar={handleOpenSidebar} canManage={canManage} />
+      ) : visiblePage === 'intro-training' ? (
+        <IntroTrainingPage onOpenSidebar={handleOpenSidebar} canManage={canManage} />
       ) : (
-        <HomePage onOpenSidebar={handleOpenSidebar} />
+        <HomePage onOpenSidebar={handleOpenSidebar} canManage={canManage} />
       )}
     </main>
   );
