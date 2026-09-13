@@ -82,7 +82,7 @@ const endOfYear = (year: number) => {
 
 const toYearEndWeeks = (anchorDate: Date) => {
   const weeks: ScheduleWeek[] = [];
-  const current = startOfWeek(anchorDate);
+  const current = startOfWeek(new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1));
   const lastDay = endOfYear(anchorDate.getFullYear());
 
   let weekIndex = 1;
@@ -136,6 +136,25 @@ const monthOptions = Array.from({ length: 12 - currentMonthIndex }, (_, offset) 
 const getMonthWeeks = (weeks: ScheduleWeek[], monthIndex: number) =>
   weeks.filter((week) => week.days.some((day) => day.date.getMonth() === monthIndex));
 
+const isSameCalendarDay = (left: Date, right: Date) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const getInitialWeekId = (weeks: ScheduleWeek[], monthIndex: number) => {
+  if (monthIndex === currentMonthIndex) {
+    const currentWeek = weeks.find((week) =>
+      week.days.some((day) => isSameCalendarDay(day.date, now)),
+    );
+
+    if (currentWeek) {
+      return currentWeek.id;
+    }
+  }
+
+  return weeks[0]?.id ?? null;
+};
+
 const getCellKey = (date: Date, slot: string) =>
   `schedule-${getDateKey(date)}-${slot.replace(/[^0-9]/g, '')}`;
 
@@ -152,10 +171,15 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const weekRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const selectedMonthWeeks = useMemo(
     () => getMonthWeeks(currentYearWeeks, selectedMonth),
     [selectedMonth],
+  );
+  const initialWeekId = useMemo(
+    () => getInitialWeekId(selectedMonthWeeks, selectedMonth),
+    [selectedMonth, selectedMonthWeeks],
   );
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
 
@@ -251,8 +275,19 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
   }, [canManage]);
 
   useEffect(() => {
-    boardScrollRef.current?.scrollTo({ left: 0 });
-  }, [selectedMonth]);
+    const board = boardScrollRef.current;
+    const targetWeek = initialWeekId ? weekRefs.current[initialWeekId] : null;
+
+    if (!board || !targetWeek) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      board.scrollTo({ left: targetWeek.offsetLeft, behavior: 'auto' });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [initialWeekId]);
 
   const commitTrainer = async (
     cellKey: string,
@@ -376,10 +411,18 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
 
         <div ref={boardScrollRef} className="overflow-x-auto scroll-smooth snap-x snap-mandatory pb-2">
           <div className="flex gap-0">
-            {selectedMonthWeeks.map((week, weekIndex) => (
+            {selectedMonthWeeks.map((week, weekIndex) => {
+              const isCurrentWeek = week.days.some((day) => isSameCalendarDay(day.date, now));
+
+              return (
               <section
                 key={week.id}
-                className="w-full shrink-0 snap-start overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
+                ref={(element) => {
+                  weekRefs.current[week.id] = element;
+                }}
+                className={`w-full shrink-0 snap-start overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${
+                  isCurrentWeek ? 'ring-2 ring-[#ff6a00]/25' : ''
+                }`}
               >
                 <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3">
                   <div>
@@ -388,7 +431,14 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
                       {week.days[0]?.label} - {week.days[week.days.length - 1]?.label}
                     </p>
                   </div>
-                  <div className="h-1.5 w-16 rounded-full bg-[#ff6a00] sm:w-24" />
+                  <div className="flex items-center gap-3">
+                    {isCurrentWeek ? (
+                      <span className="hidden rounded-full bg-[#ff6a00] px-2.5 py-1 text-[10px] font-bold text-white sm:inline-flex">
+                        Текущая неделя
+                      </span>
+                    ) : null}
+                    <div className="h-1.5 w-16 rounded-full bg-[#ff6a00] sm:w-24" />
+                  </div>
                 </div>
 
                 <div className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4 xl:hidden">
@@ -519,7 +569,8 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
                   </table>
                 </div>
               </section>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

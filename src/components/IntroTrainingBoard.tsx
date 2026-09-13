@@ -101,7 +101,7 @@ const endOfYear = (year: number) => {
 
 const toYearEndWeeks = (anchorDate: Date) => {
   const weeks: IntroTrainingWeek[] = [];
-  const current = startOfWeek(anchorDate);
+  const current = startOfWeek(new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1));
   const lastDay = endOfYear(anchorDate.getFullYear());
 
   let weekIndex = 1;
@@ -154,6 +154,25 @@ const monthOptions = Array.from({ length: 12 - currentMonthIndex }, (_, offset) 
 
 const getMonthWeeks = (weeks: IntroTrainingWeek[], monthIndex: number) =>
   weeks.filter((week) => week.days.some((day) => day.date.getMonth() === monthIndex));
+
+const isSameCalendarDay = (left: Date, right: Date) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const getInitialWeekId = (weeks: IntroTrainingWeek[], monthIndex: number) => {
+  if (monthIndex === currentMonthIndex) {
+    const currentWeek = weeks.find((week) =>
+      week.days.some((day) => isSameCalendarDay(day.date, now)),
+    );
+
+    if (currentWeek) {
+      return currentWeek.id;
+    }
+  }
+
+  return weeks[0]?.id ?? null;
+};
 
 const getWeekdayDays = (days: IntroTrainingDay[]) =>
   days.filter((day) => day.date.getDay() >= 1 && day.date.getDay() <= 5);
@@ -439,10 +458,15 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const weekRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const selectedMonthWeeks = useMemo(
     () => getMonthWeeks(currentYearWeeks, selectedMonth),
     [selectedMonth],
+  );
+  const initialWeekId = useMemo(
+    () => getInitialWeekId(selectedMonthWeeks, selectedMonth),
+    [selectedMonth, selectedMonthWeeks],
   );
 
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
@@ -533,8 +557,19 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
   }, [canManage]);
 
   useEffect(() => {
-    boardScrollRef.current?.scrollTo({ left: 0 });
-  }, [selectedMonth]);
+    const board = boardScrollRef.current;
+    const targetWeek = initialWeekId ? weekRefs.current[initialWeekId] : null;
+
+    if (!board || !targetWeek) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      board.scrollTo({ left: targetWeek.offsetLeft, behavior: 'auto' });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [initialWeekId]);
 
   const commitTrainer = async (
     cellKey: string,
@@ -659,11 +694,17 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
             {selectedMonthWeeks.map((week, weekIndex) => {
               const weekdayDays = getWeekdayDays(week.days);
               const weekendDays = getWeekendDays(week.days);
+              const isCurrentWeek = week.days.some((day) => isSameCalendarDay(day.date, now));
 
               return (
                 <section
                   key={week.id}
-                  className="w-full shrink-0 snap-start overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
+                  ref={(element) => {
+                    weekRefs.current[week.id] = element;
+                  }}
+                  className={`w-full shrink-0 snap-start overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${
+                    isCurrentWeek ? 'ring-2 ring-[#ff6a00]/25' : ''
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3">
                     <div>
@@ -674,7 +715,14 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
                         {week.days[0]?.label} - {week.days[week.days.length - 1]?.label}
                       </p>
                     </div>
-                    <div className="h-1.5 w-16 rounded-full bg-[#ff6a00] sm:w-24" />
+                    <div className="flex items-center gap-3">
+                      {isCurrentWeek ? (
+                        <span className="hidden rounded-full bg-[#ff6a00] px-2.5 py-1 text-[10px] font-bold text-white sm:inline-flex">
+                          Текущая неделя
+                        </span>
+                      ) : null}
+                      <div className="h-1.5 w-16 rounded-full bg-[#ff6a00] sm:w-24" />
+                    </div>
                   </div>
 
                   <div className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4 xl:hidden">
