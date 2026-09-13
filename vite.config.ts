@@ -4,7 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/DDX-Schedule-Manager/',
+  // GitHub Pages serves the project from a repository subpath.
+  // Tatnet and local builds serve it from the domain root.
+  base: process.env.GITHUB_ACTIONS === 'true' ? '/DDX-Schedule-Manager/' : '/',
   plugins: [
     react(),
     tailwindcss(),
