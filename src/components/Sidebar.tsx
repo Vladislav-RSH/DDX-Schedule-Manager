@@ -25,9 +25,10 @@ type SidebarProps = {
   isOpen: boolean;
   currentPage: string;
   onClose: () => void;
+  onSignOut: () => void;
 };
 
-function Sidebar({ isOpen, currentPage, onClose }: SidebarProps) {
+function Sidebar({ isOpen, currentPage, onClose, onSignOut }: SidebarProps) {
   return (
     <>
       {isOpen ? (
@@ -40,7 +41,7 @@ function Sidebar({ isOpen, currentPage, onClose }: SidebarProps) {
       ) : null}
 
       <aside
-        className={`fixed left-0 top-0 z-50 h-screen w-72 max-w-[calc(100vw-2rem)] border-r border-slate-200 bg-white shadow-2xl transition-transform duration-200 ${
+        className={`fixed left-0 top-0 z-50 flex h-screen w-72 max-w-[calc(100vw-2rem)] flex-col border-r border-slate-200 bg-white shadow-2xl transition-transform duration-200 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         aria-hidden={!isOpen}
@@ -58,7 +59,7 @@ function Sidebar({ isOpen, currentPage, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <nav className="flex flex-col gap-2 p-4">
+        <nav className="flex flex-1 flex-col gap-2 p-4">
           {navigationItems.map((item) => {
             const isActive = item.id === currentPage;
 
@@ -79,6 +80,19 @@ function Sidebar({ isOpen, currentPage, onClose }: SidebarProps) {
             );
           })}
         </nav>
+
+        <div className="border-t border-slate-200 p-4">
+          <button
+            type="button"
+            className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-[#ff6a00]/30"
+            onClick={() => {
+              onSignOut();
+              onClose();
+            }}
+          >
+            Выйти
+          </button>
+        </div>
       </aside>
     </>
   );
