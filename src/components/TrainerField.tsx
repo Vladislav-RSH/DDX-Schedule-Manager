@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   getTrainerShortName,
   normalizeValue,
@@ -25,6 +26,13 @@ type TrainerFieldProps = {
   onCommit: (trainer: Trainer | null) => void;
 };
 
+type DropdownPosition = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+};
+
 function TrainerField({
   inputId,
   selectedValue,
@@ -39,6 +47,9 @@ function TrainerField({
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null);
   const selectedTrainerIndex = trainerOptions.findIndex(
     ({ trainer }) => trainer.id === selectedTrainerId,
   );
@@ -60,7 +71,11 @@ function TrainerField({
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
 
-      if (containerRef.current && target && !containerRef.current.contains(target)) {
+      if (
+        target &&
+        !containerRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
         setIsOpen(false);
         setActiveIndex(0);
         setQuery(selectedValue);
@@ -78,6 +93,57 @@ function TrainerField({
     };
   }, [isOpen, selectedValue]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const updateDropdownPosition = () => {
+      const input = inputRef.current;
+
+      if (!input) {
+        return;
+      }
+
+      const rect = input.getBoundingClientRect();
+      const viewportPadding = 8;
+      const gap = 4;
+      const spaceBelow = window.innerHeight - rect.bottom - gap - viewportPadding;
+      const spaceAbove = rect.top - gap - viewportPadding;
+      const openAbove = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const availableSpace = openAbove ? spaceAbove : spaceBelow;
+      const maxHeight = Math.max(96, Math.min(320, availableSpace));
+      const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.left),
+        window.innerWidth - viewportPadding - width,
+      );
+      const top = openAbove
+        ? Math.max(viewportPadding, rect.top - gap - maxHeight)
+        : Math.min(
+            window.innerHeight - viewportPadding - maxHeight,
+            rect.bottom + gap,
+          );
+
+      setDropdownPosition({
+        top,
+        left,
+        width,
+        maxHeight,
+      });
+    };
+
+    const frameId = window.requestAnimationFrame(updateDropdownPosition);
+    window.addEventListener('resize', updateDropdownPosition);
+    window.addEventListener('scroll', updateDropdownPosition, true);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', updateDropdownPosition);
+      window.removeEventListener('scroll', updateDropdownPosition, true);
+    };
+  }, [isOpen]);
+
   const commitTrainer = (trainer: Trainer | null) => {
     onCommit(trainer);
     setIsOpen(false);
@@ -92,6 +158,7 @@ function TrainerField({
 
     const input = event.currentTarget;
 
+    setDropdownPosition(null);
     setIsOpen(true);
     setQuery(selectedValue);
     setActiveIndex(selectedTrainerIndex >= 0 ? selectedTrainerIndex : 0);
@@ -134,6 +201,7 @@ function TrainerField({
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+      setDropdownPosition(null);
       setIsOpen(true);
       setActiveIndex((currentIndex) =>
         filteredOptions.length === 0 ? 0 : (currentIndex + 1) % filteredOptions.length,
@@ -143,6 +211,7 @@ function TrainerField({
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
+      setDropdownPosition(null);
       setIsOpen(true);
       setActiveIndex((currentIndex) =>
         filteredOptions.length === 0
@@ -184,6 +253,7 @@ function TrainerField({
     <div ref={containerRef} className="relative w-full min-w-0">
       <input
         id={inputId}
+        ref={inputRef}
         type="text"
         autoComplete="off"
         spellCheck={false}
@@ -200,45 +270,63 @@ function TrainerField({
         onKeyDown={handleKeyDown}
       />
 
-      {isOpen && !disabled && !saving ? (
-        <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
-          <ul id={`${inputId}-options`} role="listbox" className="max-h-56 overflow-auto py-1 text-left">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map(({ trainer, label }, index) => {
-                const isSelected = selectedTrainerId === trainer.id;
-                const isHighlighted = index === visibleActiveIndex;
+      {isOpen && !disabled && !saving && dropdownPosition
+        ? createPortal(
+            <div
+              ref={dropdownRef}
+              className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-xl"
+              style={{
+                position: 'fixed',
+                top: dropdownPosition.top,
+                left: dropdownPosition.left,
+                width: dropdownPosition.width,
+                zIndex: 1000,
+              }}
+            >
+              <ul
+                id={`${inputId}-options`}
+                role="listbox"
+                className="overflow-y-auto overscroll-contain py-1 text-left"
+                style={{ maxHeight: dropdownPosition.maxHeight }}
+              >
+                {filteredOptions.length > 0 ? (
+                  filteredOptions.map(({ trainer, label }, index) => {
+                    const isSelected = selectedTrainerId === trainer.id;
+                    const isHighlighted = index === visibleActiveIndex;
 
-                return (
-                  <li key={trainer.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition ${
-                        isHighlighted
-                          ? 'bg-[#ff6a00]/10 text-slate-950'
-                          : 'text-slate-700 hover:bg-slate-50'
-                      } ${isSelected ? 'font-bold' : 'font-medium'}`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setActiveIndex(index)}
-                      onClick={() => commitTrainer(trainer)}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{label}</span>
-                      {isSelected ? (
-                        <span className="shrink-0 rounded-full bg-[#ecfdff] px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                          Выбран
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                );
-              })
-            ) : (
-              <li className="px-3 py-2 text-sm text-slate-500">Совпадений нет</li>
-            )}
-          </ul>
-        </div>
-      ) : null}
+                    return (
+                      <li key={trainer.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition ${
+                            isHighlighted
+                              ? 'bg-[#ff6a00]/10 text-slate-950'
+                              : 'text-slate-700 hover:bg-slate-50'
+                          } ${isSelected ? 'font-bold' : 'font-medium'}`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => setActiveIndex(index)}
+                          onClick={() => commitTrainer(trainer)}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{label}</span>
+                          {isSelected ? (
+                            <span className="shrink-0 rounded-full bg-[#ecfdff] px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                              Выбран
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })
+                ) : (
+                  <li className="px-3 py-2 text-sm text-slate-500">Совпадений нет</li>
+                )}
+              </ul>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
