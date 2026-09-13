@@ -14,6 +14,7 @@ export type TrainerAssignmentRecord = {
 };
 
 export type TrainerAssignmentMap = Record<string, TrainerAssignmentRecord>;
+export type TrainerAssignmentCounts = Record<string, number>;
 
 export const getTrainerName = (trainer: Trainer) =>
   [trainer.lastName, trainer.firstName].filter(Boolean).join(' ') || 'Без имени';
@@ -27,6 +28,32 @@ export const getTrainerShortNameFromLabel = (label: string) =>
 export const normalizeValue = (value: string) => value.trim().toLocaleLowerCase('ru-RU');
 
 export const getDateKey = (date: Date) => date.toISOString().slice(0, 10);
+
+const getLocalDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+
+export const getCurrentMonthAssignmentCounts = (
+  assignments: Array<Pick<TrainerAssignmentRecord, 'trainerId' | 'date'>>,
+): TrainerAssignmentCounts => {
+  const today = new Date();
+  const currentMonthStart = getLocalDateKey(new Date(today.getFullYear(), today.getMonth(), 1));
+  const nextMonthStart = getLocalDateKey(new Date(today.getFullYear(), today.getMonth() + 1, 1));
+
+  return assignments.reduce<TrainerAssignmentCounts>((counts, assignment) => {
+    if (
+      !assignment.trainerId ||
+      assignment.date < currentMonthStart ||
+      assignment.date >= nextMonthStart
+    ) {
+      return counts;
+    }
+
+    counts[assignment.trainerId] = (counts[assignment.trainerId] ?? 0) + 1;
+    return counts;
+  }, {});
+};
 
 export const buildTrainerOptions = (trainers: Trainer[]): TrainerOption[] =>
   trainers

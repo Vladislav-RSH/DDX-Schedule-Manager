@@ -16,6 +16,10 @@ import {
   updateIntroTrainingAssignment,
 } from '../api/introTrainingAssignments';
 import { getTrainers, sortTrainers, subscribeToTrainers, type Trainer } from '../api/trainers';
+import {
+  getCurrentMonthAssignmentCounts,
+  type TrainerAssignmentCounts,
+} from '../lib/trainerAssignmentUtils';
 
 type IntroTrainingDay = {
   label: string;
@@ -226,6 +230,8 @@ type TrainerFieldProps = {
   disabled: boolean;
   saving: boolean;
   readOnly?: boolean;
+  assignmentCounts?: TrainerAssignmentCounts;
+  assignmentCountLabel?: string;
   onCommit: (trainer: Trainer | null) => void;
 };
 
@@ -244,6 +250,8 @@ function TrainerField({
   disabled,
   saving,
   readOnly = false,
+  assignmentCounts,
+  assignmentCountLabel = 'назначений',
   onCommit,
 }: TrainerFieldProps) {
   const [query, setQuery] = useState(selectedValue);
@@ -315,7 +323,10 @@ function TrainerField({
       const openAbove = spaceBelow < 180 && spaceAbove > spaceBelow;
       const availableSpace = openAbove ? spaceAbove : spaceBelow;
       const maxHeight = Math.max(96, Math.min(320, availableSpace));
-      const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+      const width = Math.min(
+        Math.max(rect.width, 220),
+        window.innerWidth - viewportPadding * 2,
+      );
       const left = Math.min(
         Math.max(viewportPadding, rect.left),
         window.innerWidth - viewportPadding - width,
@@ -485,6 +496,11 @@ function TrainerField({
                 zIndex: 1000,
               }}
             >
+              {assignmentCounts ? (
+                <div className="whitespace-nowrap border-b border-slate-100 px-3 py-1.5 text-[10px] font-semibold text-slate-500">
+                  За текущий месяц: {assignmentCountLabel}
+                </div>
+              ) : null}
               <ul
                 id={`${inputId}-options`}
                 role="listbox"
@@ -495,6 +511,7 @@ function TrainerField({
                   filteredOptions.map(({ trainer, label }, index) => {
                     const isSelected = selectedTrainerId === trainer.id;
                     const isHighlighted = index === visibleActiveIndex;
+                    const assignmentCount = assignmentCounts?.[trainer.id] ?? 0;
 
                     return (
                       <li key={trainer.id}>
@@ -512,6 +529,14 @@ function TrainerField({
                           onClick={() => commitTrainer(trainer)}
                         >
                           <span className="min-w-0 flex-1 truncate">{label}</span>
+                          {assignmentCounts ? (
+                            <span
+                              className="shrink-0 rounded-full bg-[#fff1e6] px-2 py-0.5 text-[10px] font-black tabular-nums text-[#c85300]"
+                              title={`${assignmentCount} ${assignmentCountLabel} за текущий месяц`}
+                            >
+                              {assignmentCount}
+                            </span>
+                          ) : null}
                           {isSelected ? (
                             <span className="shrink-0 rounded-full bg-[#ecfdff] px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                               Выбран
@@ -558,6 +583,10 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
   );
 
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
+  const assignmentCounts = useMemo(
+    () => getCurrentMonthAssignmentCounts(Object.values(assignments)),
+    [assignments],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -856,6 +885,8 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
                                       selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                       selectedTrainerId={savedAssignment?.trainerId ?? null}
                                       trainerOptions={trainerOptions}
+                                      assignmentCounts={assignmentCounts}
+                                      assignmentCountLabel="ознаком. тренировок"
                                       disabled={!canManage || isLoading || trainerOptions.length === 0}
                                       saving={savingCells[cellKey] === true}
                                       readOnly={!canManage}
@@ -952,6 +983,8 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
                                       selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                       selectedTrainerId={savedAssignment?.trainerId ?? null}
                                       trainerOptions={trainerOptions}
+                                      assignmentCounts={assignmentCounts}
+                                      assignmentCountLabel="ознаком. тренировок"
                                       disabled={!canManage || isLoading || trainerOptions.length === 0}
                                       saving={savingCells[cellKey] === true}
                                       readOnly={!canManage}
@@ -986,6 +1019,8 @@ function IntroTrainingBoard({ onOpenSidebar, canManage }: IntroTrainingBoardProp
                                       selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                       selectedTrainerId={savedAssignment?.trainerId ?? null}
                                       trainerOptions={trainerOptions}
+                                      assignmentCounts={assignmentCounts}
+                                      assignmentCountLabel="ознаком. тренировок"
                                       disabled={!canManage || isLoading || trainerOptions.length === 0}
                                       saving={savingCells[cellKey] === true}
                                       readOnly={!canManage}

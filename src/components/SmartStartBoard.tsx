@@ -11,6 +11,7 @@ import TrainerField from './TrainerField';
 import {
   buildTrainerOptions,
   getAssignmentDisplayValue,
+  getCurrentMonthAssignmentCounts,
   getDateKey,
   getTrainerName,
   type TrainerAssignmentMap,
@@ -206,6 +207,10 @@ function SmartStartBoard({ onOpenSidebar, canManage }: SmartStartBoardProps) {
     [selectedMonth, selectedMonthWeeks],
   );
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
+  const assignmentCounts = useMemo(
+    () => getCurrentMonthAssignmentCounts(Object.values(assignments)),
+    [assignments],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -412,6 +417,8 @@ function SmartStartBoard({ onOpenSidebar, canManage }: SmartStartBoardProps) {
           selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
           selectedTrainerId={savedAssignment?.trainerId ?? null}
           trainerOptions={trainerOptions}
+          assignmentCounts={assignmentCounts}
+          assignmentCountLabel="Smart Start"
           disabled={!canManage || isLoading || trainerOptions.length === 0}
           saving={savingCells[cellKey] === true}
           readOnly={!canManage}

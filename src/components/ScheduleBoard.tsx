@@ -11,6 +11,7 @@ import TrainerField from './TrainerField';
 import {
   buildTrainerOptions,
   getAssignmentDisplayValue,
+  getCurrentMonthAssignmentCounts,
   getDateKey,
   getTrainerName,
   type TrainerAssignmentMap,
@@ -182,6 +183,10 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
     [selectedMonth, selectedMonthWeeks],
   );
   const trainerOptions = useMemo(() => buildTrainerOptions(trainers), [trainers]);
+  const assignmentCounts = useMemo(
+    () => getCurrentMonthAssignmentCounts(Object.values(assignments)),
+    [assignments],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -482,6 +487,8 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
                                     selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                     selectedTrainerId={savedAssignment?.trainerId ?? null}
                                     trainerOptions={trainerOptions}
+                                    assignmentCounts={assignmentCounts}
+                                    assignmentCountLabel="дежурств"
                                     disabled={!canManage || isLoading || trainerOptions.length === 0}
                                     saving={savingCells[cellKey] === true}
                                     readOnly={!canManage}
@@ -552,6 +559,8 @@ function ScheduleBoard({ onOpenSidebar, canManage }: ScheduleBoardProps) {
                                     selectedValue={getAssignmentDisplayValue(savedAssignment, trainerOptions)}
                                     selectedTrainerId={savedAssignment?.trainerId ?? null}
                                     trainerOptions={trainerOptions}
+                                    assignmentCounts={assignmentCounts}
+                                    assignmentCountLabel="дежурств"
                                     disabled={!canManage || isLoading || trainerOptions.length === 0}
                                     saving={savingCells[cellKey] === true}
                                     readOnly={!canManage}
